@@ -7,7 +7,7 @@ class StaticAnalysisAgent:
         # Stores all issues found by different tools
         self.results = []
 
-    # --- 1️Run Pylint (Style & Syntax Checking) ---
+    # --- Run Pylint (Style & Syntax Checking) ---
     def run_pylint(self, file_path):
         try:
             # Command to run pylint in JSON output mode
@@ -31,7 +31,7 @@ class StaticAnalysisAgent:
         except Exception as e:
             print("Error running Pylint:", e)
 
-    # --- 2️Run Bandit (Security Vulnerability Scanner) ---
+    # --- Run Bandit (Security Vulnerability Scanner) ---
     def run_bandit(self, file_path):
         try:
             # Command to run Bandit recursively with JSON output
@@ -52,7 +52,7 @@ class StaticAnalysisAgent:
         except Exception as e:
             print("Error running Bandit:", e)
 
-    # --- 3️Run Radon (Cyclomatic Complexity Analysis) ---
+    # --- Run Radon (Cyclomatic Complexity Analysis) ---
     def run_radon(self, file_path):
         try:
             # Command to calculate code complexity using Radon
@@ -76,7 +76,7 @@ class StaticAnalysisAgent:
         except Exception as e:
             print("Error running Radon:", e)
 
-    # --- 4️Run Maintainability Index Calculation ---
+    # --- Run Maintainability Index Calculation ---
     def run_maintainability(self, file_path):
         try:
             # Command to compute maintainability index via Radon
@@ -104,7 +104,7 @@ class StaticAnalysisAgent:
         except Exception as e:
             print("Error computing maintainability:", e)
 
-    # --- 5️Run All Checks Together ---
+    # --- Run All Checks Together ---
     def analyze(self, file_path):
         """
         Runs all static analysis tools in sequence
