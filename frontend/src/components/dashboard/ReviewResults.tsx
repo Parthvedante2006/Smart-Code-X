@@ -133,8 +133,8 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
               {result.overallScore >= 80
                 ? 'Great job! Your code is in good shape.'
                 : result.overallScore >= 60
-                ? 'Some issues need attention.'
-                : 'Critical issues found. Review recommended.'}
+                  ? 'Some issues need attention.'
+                  : 'Critical issues found. Review recommended.'}
             </p>
           </CardContent>
         </Card>

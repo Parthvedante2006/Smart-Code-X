@@ -57,31 +57,31 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
+
       {/* Hero Section */}
       <section className="relative overflow-hidden pt-20 pb-32">
         <div className="absolute inset-0 pointer-events-none">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-primary/10 rounded-full blur-[120px]" />
         </div>
-        
+
         <div className="container relative">
           <div className="flex flex-col items-center text-center max-w-4xl mx-auto">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-8 animate-fade-in">
               <Star className="h-4 w-4 fill-primary" />
               AI-Powered Code Review Platform
             </div>
-            
+
             <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-6 animate-slide-up">
               Ship Better Code,{' '}
               <span className="text-gradient">Faster</span>
             </h1>
-            
+
             <p className="text-xl text-muted-foreground mb-10 max-w-2xl animate-slide-up" style={{ animationDelay: '0.1s' }}>
-              SmartCodeX uses advanced AI to analyze your codebase, catch bugs, 
-              identify security vulnerabilities, and suggest improvements — 
+              SmartCodeX uses advanced AI to analyze your codebase, catch bugs,
+              identify security vulnerabilities, and suggest improvements —
               all in seconds, not hours.
             </p>
-            
+
             <div className="flex flex-col sm:flex-row gap-4 animate-slide-up" style={{ animationDelay: '0.2s' }}>
               <Button size="lg" asChild className="bg-gradient-primary hover:opacity-90 h-12 px-8 text-lg glow-primary-sm">
                 <Link to="/auth?mode=register">
@@ -93,7 +93,7 @@ export default function Landing() {
                 <Link to="/auth">View Demo</Link>
               </Button>
             </div>
-            
+
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mt-20 w-full animate-fade-in" style={{ animationDelay: '0.3s' }}>
               {stats.map((stat) => (
@@ -106,7 +106,7 @@ export default function Landing() {
           </div>
         </div>
       </section>
-      
+
       {/* Features Section */}
       <section className="py-24 bg-muted/30">
         <div className="container">
@@ -118,7 +118,7 @@ export default function Landing() {
               Comprehensive analysis tools designed for modern development teams.
             </p>
           </div>
-          
+
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature) => (
               <div
@@ -135,7 +135,7 @@ export default function Landing() {
           </div>
         </div>
       </section>
-      
+
       {/* How It Works */}
       <section className="py-24">
         <div className="container">
@@ -147,7 +147,7 @@ export default function Landing() {
               Get your code reviewed in three simple steps.
             </p>
           </div>
-          
+
           <div className="grid md:grid-cols-3 gap-8 max-w-4xl mx-auto">
             {[
               { step: '01', title: 'Upload Your Code', description: 'Drag and drop your project files or connect your GitHub repository.' },
@@ -166,7 +166,7 @@ export default function Landing() {
           </div>
         </div>
       </section>
-      
+
       {/* CTA Section */}
       <section className="py-24 bg-muted/30">
         <div className="container">
@@ -202,7 +202,7 @@ export default function Landing() {
           </div>
         </div>
       </section>
-      
+
       {/* Footer */}
       <footer className="py-12 border-t border-border">
         <div className="container">

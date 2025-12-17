@@ -19,7 +19,7 @@ const steps: { key: ReviewStep; label: string; icon: typeof FileSearch }[] = [
 
 export function ReviewProgressDisplay({ currentStep, progress }: ReviewProgressDisplayProps) {
   const currentStepIndex = steps.findIndex(s => s.key === currentStep);
-  
+
   return (
     <Card className="bg-card/50 backdrop-blur-sm border-border/50">
       <CardHeader>
@@ -37,14 +37,14 @@ export function ReviewProgressDisplay({ currentStep, progress }: ReviewProgressD
           </div>
           <Progress value={progress} className="h-2" />
         </div>
-        
+
         {/* Steps */}
         <div className="space-y-4">
           {steps.map((step, index) => {
             const isCompleted = index < currentStepIndex;
             const isCurrent = index === currentStepIndex;
             const isPending = index > currentStepIndex;
-            
+
             return (
               <div
                 key={step.key}

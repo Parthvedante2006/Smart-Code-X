@@ -69,9 +69,9 @@ export function DashboardSidebar({
         onClick={onToggleCollapse}
         title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
       >
-        <div className="flex items-center gap-3 text-primary">
-          <img src="/favicon.ico" alt="Logo" className="h-8 w-8" />
-          {!isCollapsed && <span className="font-semibold text-lg text-foreground">Reviews</span>}
+        <div className="flex items-center gap-2 text-primary">
+          <Code2 className="h-6 w-6" />
+          {!isCollapsed && <span className="font-semibold text-foreground">Reviews</span>}
         </div>
       </div>
 

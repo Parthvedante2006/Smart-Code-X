@@ -42,17 +42,17 @@ export function ProjectUpload({ onUpload, onGithubSubmit, isLoading }: ProjectUp
 
   const handleGithubSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!githubUrl.trim()) {
       setGithubError('Please enter a GitHub URL');
       return;
     }
-    
+
     if (!validateGithubUrl(githubUrl)) {
       setGithubError('Please enter a valid GitHub repository URL');
       return;
     }
-    
+
     setGithubError('');
     onGithubSubmit(githubUrl);
   };
@@ -77,7 +77,7 @@ export function ProjectUpload({ onUpload, onGithubSubmit, isLoading }: ProjectUp
               GitHub
             </TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="upload" className="mt-6">
             <div
               {...getRootProps()}
@@ -108,7 +108,7 @@ export function ProjectUpload({ onUpload, onGithubSubmit, isLoading }: ProjectUp
                 </div>
               </div>
             </div>
-            
+
             {fileRejections.length > 0 && (
               <div className="flex items-center gap-2 mt-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
                 <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -116,7 +116,7 @@ export function ProjectUpload({ onUpload, onGithubSubmit, isLoading }: ProjectUp
               </div>
             )}
           </TabsContent>
-          
+
           <TabsContent value="github" className="mt-6">
             <form onSubmit={handleGithubSubmit} className="space-y-4">
               <div className="space-y-2">
@@ -141,7 +141,7 @@ export function ProjectUpload({ onUpload, onGithubSubmit, isLoading }: ProjectUp
                   </p>
                 )}
               </div>
-              
+
               <Button
                 type="submit"
                 className="w-full bg-gradient-primary hover:opacity-90"
