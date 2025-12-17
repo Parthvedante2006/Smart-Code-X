@@ -16,3 +16,7 @@ dist/
 # OS junk
 .DS_Store
 Thumbs.db
+
+backend/serviceAccountKey.json
+# Editor configs
+.vscode/
