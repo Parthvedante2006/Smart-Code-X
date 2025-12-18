@@ -68,32 +68,72 @@ function ScoreGauge({ score }: { score: number }) {
 
 function RecommendationCard({ rec }: { rec: IERARecommendation }) {
   return (
-    <Card className="border-l-4 border-l-primary/50">
+    <Card className="border-l-4 border-l-primary/50 hover:shadow-md transition-shadow">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between">
           <div>
-            <CardTitle className="text-lg">{rec.title}</CardTitle>
-            <CardDescription className="capitalize mt-1 flex items-center gap-2">
-              <Badge variant="outline">{rec.category}</Badge>
-              <Badge variant="secondary">Effort: {rec.effort}</Badge>
-              <Badge variant="secondary">Impact: {rec.impact}</Badge>
+            <CardTitle className="text-lg text-primary">{rec.title}</CardTitle>
+            <CardDescription className="capitalize mt-2 flex items-center gap-2 flex-wrap">
+              <Badge variant="outline">{rec.category.replace('_', ' ')}</Badge>
+              <Badge variant={rec.strength === 'Strong Suggestion' ? 'default' : 'secondary'}>
+                {rec.strength || 'Info'}
+              </Badge>
+              <Badge variant="secondary" className="bg-muted">Effort: {rec.effort}</Badge>
+              <Badge variant="secondary" className="bg-muted">Impact: {rec.impact}</Badge>
             </CardDescription>
           </div>
-          <div className="text-sm font-bold text-primary">{Math.round(rec.confidence * 100)}% Conf</div>
+          <div className="text-sm font-bold text-primary whitespace-nowrap ml-4">
+            {Math.round((rec.evidence?.similarity_score || 0.95) * 100)}% Conf
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <p className="text-muted-foreground">{rec.description}</p>
+        {rec.explanation && (
+          <div className="bg-primary/5 p-3 rounded-md border border-primary/10">
+            <p className="font-semibold text-primary mb-1 flex items-center gap-2">
+              <Lightbulb className="h-4 w-4" /> Why this matters
+            </p>
+            <p className="text-foreground/90 leading-relaxed">{rec.explanation}</p>
+          </div>
+        )}
+
+        <div className="text-muted-foreground">
+          {rec.description}
+        </div>
+
+        {rec.suggestions && rec.suggestions.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="font-semibold flex items-center gap-2 text-foreground">
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              Suggested Actions
+            </h4>
+            <ul className="list-disc list-inside space-y-1 ml-1">
+              {rec.suggestions.map((suggestion, idx) => (
+                <li key={idx} className="text-muted-foreground pl-2">{suggestion}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {rec.implementation_example && (
-          <div className="bg-muted p-3 rounded-md overflow-x-auto">
+          <div className="bg-muted p-3 rounded-md overflow-x-auto mt-2">
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Example:</p>
             <pre className="text-xs font-mono">{rec.implementation_example}</pre>
           </div>
         )}
 
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <FileCode className="h-3 w-3" />
-          <span>Files: {rec.files.join(', ')}</span>
+        <div className="pt-2 border-t mt-4">
+          <div className="flex items-start gap-2 text-xs text-muted-foreground">
+            <FileCode className="h-4 w-4 mt-0.5" />
+            <div className="flex flex-col gap-1">
+              <span className="font-semibold">Affected Files:</span>
+              <div className="flex flex-wrap gap-1">
+                {rec.files && rec.files.map((f, i) => (
+                  <code key={i} className="bg-muted px-1.5 py-0.5 rounded text-foreground/80">{f}</code>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -153,17 +193,37 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
     });
 
     if (recommendations.length > 0) {
-      lines.push(`\n## AI Recommendations`);
+      lines.push(`\n## AI Recommendations (IERA)`);
       recommendations.forEach(rec => {
-        lines.push(`\n### ${rec.title} (${rec.category})`);
-        lines.push(`Confidence: ${Math.round(rec.confidence * 100)}%`);
-        lines.push(rec.description);
+        lines.push(`\n### ${rec.title}`);
+        lines.push(`- **Category**: ${rec.category.replace('_', ' ')}`);
+        lines.push(`- **Confidence**: ${Math.round((rec.evidence?.similarity_score || rec.confidence || 0.95) * 100)}%`);
+        lines.push(`- **Impact**: ${rec.impact} | **Effort**: ${rec.effort}`);
+
+        if (rec.explanation) {
+          lines.push(`\n**Why this matters:**`);
+          lines.push(rec.explanation);
+        } else {
+          lines.push(`\n${rec.description}`);
+        }
+
+        if (rec.suggestions && rec.suggestions.length > 0) {
+          lines.push(`\n**Suggested Actions:**`);
+          rec.suggestions.forEach(s => lines.push(`- ${s}`));
+        }
+
+        if (rec.files && rec.files.length > 0) {
+          lines.push(`\n**Affected Files:**`);
+          rec.files.forEach(f => lines.push(`- \`${f}\``));
+        }
+
         if (rec.implementation_example) {
-          lines.push('\nExample:');
+          lines.push('\n**Example:**');
           lines.push('```');
           lines.push(rec.implementation_example);
           lines.push('```');
         }
+        lines.push('\n---');
       });
     }
 

@@ -67,16 +67,22 @@ export interface GenericAgentResult {
 }
 
 export interface IERARecommendation {
-  category: string;
-  confidence: number;
-  description: string;
+  file: string;
   files: string[];
-  impact: string;
-  implementation_example: string;
-  effort: string;
+  function?: string;
+  line?: number;
+  category: string;
+  strength?: string;
   title: string;
+  description: string; // Used for fallback if explanation missing, or mapped
+  explanation?: string; // New field from IREA
+  suggestions?: string[]; // New field from IREA
+  confidence: number;
+  impact: 'Low' | 'Medium' | 'High';
+  effort: 'Low' | 'Medium' | 'High';
+  implementation_example?: string;
+  evidence?: any;
 }
-
 export interface IERAResult extends GenericAgentResult {
   recommendations: IERARecommendation[];
 }
