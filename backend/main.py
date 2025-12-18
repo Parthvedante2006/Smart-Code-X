@@ -23,6 +23,10 @@ import tempfile
 # Load environment variables
 load_dotenv()
 
+# --- Environment Config for URLs ---
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
 app = FastAPI(title="SmartCodeX Backend")
 
 # Auth Scheme
