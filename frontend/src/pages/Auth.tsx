@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_BASE_URL } from '@/services/api';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -115,7 +116,7 @@ export default function Auth() {
   const handleOAuthLogin = (provider: 'google' | 'github') => {
     setOauthLoading(provider);
     // Redirect to backend OAuth start
-    window.location.href = `http://localhost:8000/auth/${provider}/login`;
+    window.location.href = `${API_BASE_URL}/auth/${provider}/login`;
   };
 
   return (

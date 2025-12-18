@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { API_BASE_URL } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,7 +56,7 @@ export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
 
         try {
             const token = localStorage.getItem('smartcodex_token');
-            const response = await fetch('http://localhost:8000/auth/avatar', {
+            const response = await fetch(`${API_BASE_URL}/auth/avatar`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -92,7 +93,7 @@ export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
         setIsLoading(true);
         try {
             const token = localStorage.getItem('smartcodex_token');
-            const response = await fetch('http://localhost:8000/auth/profile', {
+            const response = await fetch(`${API_BASE_URL}/auth/profile`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',

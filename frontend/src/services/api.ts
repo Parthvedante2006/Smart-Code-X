@@ -1,7 +1,7 @@
 
 import type { ReviewResult, Severity, CodeIssue, FileAnalysis, AnalysisResult, SAAIssue, SAAResult } from '@/types';
 
-const BASE_URL = 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const getAuthHeader = () => {
     const token = localStorage.getItem('smartcodex_token');
@@ -97,7 +97,7 @@ const transformAnalysisToReview = (backendData: any): ReviewResult => {
 export const api = {
     reviews: {
         async list(): Promise<ReviewResult[]> {
-            const response = await fetch(`${BASE_URL}/reviews`, {
+            const response = await fetch(`${API_BASE_URL}/reviews`, {
                 headers: getAuthHeader(),
             });
             if (!response.ok) throw new Error('Failed to fetch reviews');
@@ -111,7 +111,7 @@ export const api = {
             formData.append('file', file);
 
             // Note: This matches the endpoint we just created
-            const response = await fetch(`${BASE_URL}/analyze/upload-zip`, {
+            const response = await fetch(`${API_BASE_URL}/analyze/upload-zip`, {
                 method: 'POST',
                 headers: {
                     ...getAuthHeader(),
@@ -129,7 +129,7 @@ export const api = {
         },
 
         async analyzeGithub(url: string): Promise<ReviewResult> {
-            const response = await fetch(`${BASE_URL}/analyze/github`, {
+            const response = await fetch(`${API_BASE_URL}/analyze/github`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -148,7 +148,7 @@ export const api = {
         },
 
         async delete(id: string): Promise<void> {
-            const response = await fetch(`${BASE_URL}/reviews/${id}`, {
+            const response = await fetch(`${API_BASE_URL}/reviews/${id}`, {
                 method: 'DELETE',
                 headers: getAuthHeader(),
             });
@@ -158,7 +158,7 @@ export const api = {
 
     feedback: {
         async submit(data: { name?: string; email?: string; type: string; message: string }): Promise<void> {
-            const response = await fetch(`${BASE_URL}/feedback`, {
+            const response = await fetch(`${API_BASE_URL}/feedback`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
