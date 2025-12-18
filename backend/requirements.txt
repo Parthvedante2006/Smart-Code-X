@@ -9,3 +9,4 @@ python-dotenv>=1.0.0
 sqlalchemy>=2.0.25
 pydantic>=2.6.0
 firebase-admin>=6.2.0
+python-multipart>=0.0.6
