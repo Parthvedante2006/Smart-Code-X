@@ -1,6 +1,7 @@
 
 import type { ReviewResult, Severity, CodeIssue, FileAnalysis, AnalysisResult, SAAIssue, SAAResult } from '@/types';
 
+// Backend URL from environment or default to localhost
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const getAuthHeader = () => {
