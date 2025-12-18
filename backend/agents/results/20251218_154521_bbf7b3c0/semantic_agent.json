@@ -1,0 +1,12 @@
+{
+  "agent": "SCAA",
+  "session_id": "20251218_154521_bbf7b3c0",
+  "issues": [],
+  "summary": {
+    "total_files": 1,
+    "files_analyzed": 0,
+    "functions_analyzed": 0,
+    "issues_found": 0,
+    "average_similarity": 0.0
+  }
+}

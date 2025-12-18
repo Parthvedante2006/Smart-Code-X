@@ -13,20 +13,30 @@ Usage (for testing):
 """
 
 import os
+import sys
 import json
+import logging
 from typing import Dict, Any
+from pathlib import Path
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 # ---- Import your agents ----
 from agents.static_agent import StaticAnalysisAgent
 from agents.semantic_agent import analyze_semantic
 from agents.recommender_agent import generate_recommendations
 
-# ⚠️ Adjust this import based on your file name:
-# if your file is agents/hdva_agent.py and you write an analyze_hdva(repo_path) there:
+# HDVA (Hallucination Detection and Validation Agent)
 try:
-    from agents.hdva_agent import analyze_hdva   # You will implement this wrapper
+    from agents.hallucination_agent import analyze_hdva
 except ImportError:
     analyze_hdva = None  # fallback, we will handle below
+
+# Import file collector to collect files once
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'agents', 'static_agent_files'))
+from collect_python_files import collect_python_files
 
 
 # ---------- Helpers to run each agent safely ----------
@@ -43,6 +53,45 @@ def run_saa(repo_path: str):
         return saa_output, None
     except Exception as e:
         return [], f"SAA error: {e}"
+
+
+def run_saa_with_session(repo_path: str, temp_folder: str, session_id: str, results_folder: str):
+    """Run Static Analysis Agent with existing session."""
+    try:
+        from agents.static_agent import analyze_temp_folder
+        saa_output = analyze_temp_folder(
+            temp_folder=temp_folder,
+            session_id=session_id,
+            results_base_folder=results_folder
+        )
+        return saa_output, None
+    except Exception as e:
+        return {}, f"SAA error: {e}"
+
+
+def run_scaa_with_session(temp_folder: str, session_id: str, results_folder: str):
+    """Run Semantic Analysis Agent with existing session."""
+    try:
+        from agents.semantic_agent import SemanticAnalyzer
+        analyzer = SemanticAnalyzer()
+        scaa_output = analyzer.analyze_repository_with_session(temp_folder, session_id, results_folder)
+        return scaa_output, None
+    except Exception as e:
+        return {"agent": "SCAA", "issues": [], "summary": {}}, f"SCAA error: {e}"
+
+
+def run_hdva_with_session(temp_folder: str, session_id: str, results_folder: str):
+    """Run Hallucination Detection Agent with existing session."""
+    if analyze_hdva is None:
+        return {"agent": "HDVA", "issues": [], "summary": {}}, "HDVA analyze_hdva() not implemented/importable"
+    
+    try:
+        from agents.hallucination_agent import HallucinationDetector
+        detector = HallucinationDetector()
+        hdva_output = detector.analyze_repository_with_session(temp_folder, session_id, results_folder)
+        return hdva_output, None
+    except Exception as e:
+        return {"agent": "HDVA", "issues": [], "summary": {}}, f"HDVA error: {e}"
 
 
 def run_scaa(repo_path: str):
@@ -98,7 +147,8 @@ def run_hdva(repo_path: str):
 def run_all_agents(repo_path: str) -> Dict[str, Any]:
     """
     High-level function that:
-    - Runs SAA, SCAA, HDVA
+    - Collects files once and creates ONE session_id folder
+    - Runs SAA, SCAA, HDVA on the same session
     - Passes their outputs into IERA
     - Returns final combined JSON
     """
@@ -109,17 +159,34 @@ def run_all_agents(repo_path: str) -> Dict[str, Any]:
             "message": f"Repository path does not exist: {repo_path}"
         }
 
-    # 1) Run all analysis agents
-    saa_output, saa_err = run_saa(repo_path)
-    scaa_output, scaa_err = run_scaa(repo_path)
-    hdva_output, hdva_err = run_hdva(repo_path)
-
-    # 2) Run IERA on whatever we got (even if some agents failed)
-    iera_output = generate_recommendations(
-        saa_output=saa_output,
-        scaa_output=scaa_output,
-        hdva_output=hdva_output
+    # 0) Collect files ONCE - this creates ONE session_id for all agents
+    base_temp_folder = os.path.join("agents", "temp")
+    base_results_folder = os.path.join("agents", "results")
+    
+    logger.info(f"Collecting Python files from: {repo_path}")
+    collected_files, collection_stats, session_id = collect_python_files(
+        repo_path, 
+        base_temp_folder=base_temp_folder
     )
+    
+    logger.info(f"Session ID: {session_id}")
+    logger.info(f"Collected {len(collected_files)} Python files")
+    logger.info(f"Files stored in: {base_temp_folder}/{session_id}/")
+    
+    if not collected_files:
+        return {
+            "status": "error",
+            "message": "No Python files found in the repository"
+        }
+    
+    # 1) Run all analysis agents with the SAME session_id
+    temp_folder_path = str(Path(base_temp_folder) / session_id)
+    saa_output, saa_err = run_saa_with_session(repo_path, temp_folder_path, session_id, base_results_folder)
+    scaa_output, scaa_err = run_scaa_with_session(temp_folder_path, session_id, base_results_folder)
+    hdva_output, hdva_err = run_hdva_with_session(temp_folder_path, session_id, base_results_folder)
+
+    # 2) Run IERA - it reads from stored JSON files
+    iera_output = generate_recommendations(session_id=session_id, results_base_folder=base_results_folder)
 
     # 3) Collect errors (if any)
     errors = []

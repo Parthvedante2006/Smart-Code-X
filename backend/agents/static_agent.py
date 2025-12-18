@@ -9,7 +9,8 @@ from typing import List, Dict, Any, Tuple
 from collections import defaultdict
 import hashlib
 
-from static_agent_files.collect_python_files import collect_python_files
+# Use package-relative import so this works when called via orchestrator
+from .static_agent_files.collect_python_files import collect_python_files
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -622,6 +623,39 @@ class StaticCodeAnalyzer:
             'information': 'info'
         }
         return mapping.get(pylint_type.lower(), 'info')
+
+
+class StaticAnalysisAgent:
+    """
+    Wrapper class for orchestrator compatibility.
+    Provides a simple interface that matches what the orchestrator expects.
+    """
+    
+    def __init__(self):
+        """Initialize the static analysis agent."""
+        pass
+    
+    def analyze(self, repo_path: str) -> Dict[str, Any]:
+        """
+        Analyze a repository directory.
+        
+        Args:
+            repo_path: Path to repository directory
+            
+        Returns:
+            Analysis results dictionary (compatible with orchestrator)
+        """
+        # Use the existing analyze_directory_with_collection function
+        results = analyze_directory_with_collection(
+            directory_path=repo_path,
+            base_temp_folder="temp",
+            results_base_folder="results"
+        )
+        
+        # Return issues list for orchestrator compatibility
+        # The orchestrator expects a list of issues, but we'll return the full dict
+        # and IERA can extract what it needs
+        return results
 
 
 def analyze_temp_folder(temp_folder: str = "temp", session_id: str = None, results_base_folder: str = "results") -> Dict[str, Any]:

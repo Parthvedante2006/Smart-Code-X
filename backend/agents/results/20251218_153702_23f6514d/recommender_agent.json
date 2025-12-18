@@ -1,0 +1,63 @@
+{
+  "agent": "IERA",
+  "recommendations": [
+    {
+      "file": "main.py",
+      "function": "unknown",
+      "line": 1,
+      "category": "intent_clarity",
+      "strength": "Suggestion",
+      "title": "Add function docstring",
+      "explanation": "Function 'unknown' lacks a docstring. Adding a clear docstring improves code readability and helps other developers understand the function's purpose, parameters, and return value.",
+      "suggestions": [
+        "Add a docstring describing what the function does",
+        "Document parameters and their types",
+        "Document the return value and its type"
+      ],
+      "evidence": {
+        "source": "SAA"
+      }
+    },
+    {
+      "file": "main.py",
+      "function": "unknown",
+      "line": 17,
+      "category": "consistency_style",
+      "strength": "Info",
+      "title": "Follow naming conventions",
+      "explanation": "Function 'unknown' doesn't follow Python naming conventions. Consistent naming improves code readability.",
+      "suggestions": [
+        "Use snake_case for function and variable names",
+        "Use PascalCase for class names",
+        "Use UPPER_CASE for constants",
+        "Follow PEP 8 naming conventions"
+      ],
+      "evidence": {
+        "source": "SAA"
+      }
+    }
+  ],
+  "summary": {
+    "total_recommendations": 2,
+    "category_breakdown": {
+      "intent_clarity": 1,
+      "consistency_style": 1
+    },
+    "strength_breakdown": {
+      "Suggestion": 1,
+      "Info": 1
+    },
+    "files_affected": 1,
+    "top_categories": [
+      {
+        "category": "intent_clarity",
+        "count": 1
+      },
+      {
+        "category": "consistency_style",
+        "count": 1
+      }
+    ],
+    "high_impact_count": 0
+  }
+}

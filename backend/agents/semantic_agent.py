@@ -1,593 +1,816 @@
 """
-Semantic & Contextual Analysis Agent (SCAA)
+Semantic Agent (SCAA) - Semantic Code Analysis Agent
 
-Analyzes code to detect mismatches between function intent (name, docstring)
-and actual implementation by comparing semantic embeddings.
+Analyzes Python code to check if code implementation matches its declared intent.
+Uses AST parsing and semantic embeddings to compare function names/docstrings with actual logic.
+
+Key Principles:
+- Does NOT execute code
+- Does NOT modify code
+- Does NOT guess runtime behavior
+- Uses AST to extract meaningful tokens
+- Compares intent (name/docstring) with behavior (logic tokens)
 """
 
-import os
 import ast
-import re
-from typing import Dict, List, Optional, Tuple, Any
-from collections import defaultdict
+import os
+import json
 import logging
+from pathlib import Path
+from typing import Dict, List, Any, Tuple, Optional, Set
+import sys
 
+# Add static_agent_files to path to import collect_python_files
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'static_agent_files'))
+from collect_python_files import collect_python_files
+
+# Import sentence-transformers for embeddings
 try:
-    from sentence_transformers import SentenceTransformer, util
-    import torch
-    TRANSFORMERS_AVAILABLE = True
+    from sentence_transformers import SentenceTransformer
+    EMBEDDINGS_AVAILABLE = True
 except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-    logging.warning("sentence-transformers not available. SCAA will use fallback mode.")
-
+    EMBEDDINGS_AVAILABLE = False
+    logging.warning("sentence-transformers not available. Semantic analysis will be limited.")
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+# Similarity thresholds
+SIMILARITY_THRESHOLD_LOW = 0.40
+SIMILARITY_THRESHOLD_MEDIUM = 0.65
+
+# Security-related keywords (triggers for stricter analysis)
+SECURITY_KEYWORDS = {
+    'encrypt', 'decrypt', 'encryption', 'decryption',
+    'hash', 'hashing', 'secure', 'security', 'authenticate',
+    'password', 'token', 'secret', 'key', 'auth', 'authorize'
+}
+
+# Insecure methods (flag if used with security keywords)
+INSECURE_METHODS = {
+    'base64', 'md5', 'sha1', 'eval', 'exec', 'pickle', 'marshal'
+}
+
+# Generic function names (skip analysis)
+GENERIC_NAMES = {
+    'get', 'set', 'do', 'run', 'main', 'init', 'process', 'handle',
+    'helper', 'util', 'util_func', 'temp', 'test', 'check'
+}
+
+# Test file indicators
+TEST_FILE_INDICATORS = {'test_', '_test.py', 'tests/', 'test.py'}
 
 
 class SemanticAnalyzer:
-    """Semantic & Contextual Analysis Agent implementation."""
+    """
+    Semantic Code Analysis Agent that compares function intent with implementation.
+    """
     
-    def __init__(
-        self,
-        model_name: str = "all-MiniLM-L6-v2",
-        similarity_thresholds: Optional[Dict[str, float]] = None,
-        batch_size: int = 32,
-        skip_dirs: Optional[List[str]] = None,
-        skip_test_files: bool = True
-    ):
-        """
-        Initialize the Semantic Analyzer.
-        
-        Args:
-            model_name: Name of the sentence transformer model to use
-            similarity_thresholds: Dict with 'high', 'medium', 'low' thresholds
-            batch_size: Batch size for embedding computation
-            skip_dirs: Directories to skip (e.g., ['node_modules', '.git'])
-            skip_test_files: Whether to skip test files
-        """
-        self.model_name = model_name
-        self.batch_size = batch_size
-        self.skip_dirs = skip_dirs or ['.git', '__pycache__', 'node_modules', '.venv', 'venv', 'env']
-        self.skip_test_files = skip_test_files
-        
-        # Default similarity thresholds
-        self.thresholds = similarity_thresholds or {
-            'high': 0.4,      # Below this = High severity
-            'medium': 0.65,   # Between high and medium = Medium severity
-            # Above medium = OK (not flagged)
-        }
-        
-        # Initialize model if available
+    def __init__(self):
+        """Initialize the semantic analyzer with embedding model."""
         self.model = None
-        if TRANSFORMERS_AVAILABLE:
+        if EMBEDDINGS_AVAILABLE:
             try:
-                logger.info(f"Loading embedding model: {model_name}")
-                self.model = SentenceTransformer(model_name)
+                logger.info("Loading sentence-transformers model: all-MiniLM-L6-v2")
+                self.model = SentenceTransformer('all-MiniLM-L6-v2')
                 logger.info("Model loaded successfully")
             except Exception as e:
-                logger.error(f"Failed to load model: {e}")
+                logger.error(f"Failed to load embedding model: {e}")
                 self.model = None
-        else:
-            logger.warning("Running in fallback mode without embeddings")
     
-    def _normalize_function_name(self, name: str) -> str:
+    def should_skip_file(self, file_path: str) -> bool:
         """
-        Normalize function name by splitting camelCase and snake_case.
+        Determine if a file should be skipped.
         
-        Example: 'calculateAverage' -> 'calculate average'
-                 'get_user_data' -> 'get user data'
+        Skip:
+        - Test files
+        - Generated code (optional heuristic)
         """
-        # Split camelCase
-        name = re.sub(r'(?<!^)(?=[A-Z])', ' ', name)
-        # Split snake_case and underscores
-        name = name.replace('_', ' ').replace('-', ' ')
-        # Normalize whitespace
-        name = ' '.join(name.split())
-        return name.lower()
+        file_str = str(file_path).lower()
+        for indicator in TEST_FILE_INDICATORS:
+            if indicator in file_str:
+                return True
+        return False
     
-    def _extract_tokens_from_ast(self, node: ast.AST) -> List[str]:
+    def read_file_safely(self, file_path: Path) -> Optional[str]:
         """
-        Extract meaningful tokens from AST node (function body).
+        Read a Python file safely, handling encoding issues.
         
-        Extracts:
-        - Variable names (ast.Name)
-        - Attribute names (ast.Attribute)
-        - Function call names (ast.Call)
-        - Imported modules (ast.Import, ast.ImportFrom)
-        - String literals that look meaningful
-        - Keywords
+        Returns:
+            File content as string, or None if file cannot be read.
         """
-        tokens = []
-        
-        for child in ast.walk(node):
-            # Variable and function names
-            if isinstance(child, ast.Name):
-                # Skip single-letter variables and common placeholders
-                if len(child.id) > 1 and child.id not in ['i', 'j', 'k', 'x', 'y', 'z', 'self', 'cls']:
-                    tokens.append(child.id)
-            
-            # Attribute access (e.g., obj.method, module.function)
-            elif isinstance(child, ast.Attribute):
-                if child.attr and len(child.attr) > 1:
-                    tokens.append(child.attr)
-            
-            # Function calls
-            elif isinstance(child, ast.Call):
-                if isinstance(child.func, ast.Name):
-                    if child.func.id and len(child.func.id) > 1:
-                        tokens.append(child.func.id)
-                elif isinstance(child.func, ast.Attribute):
-                    if child.func.attr and len(child.func.attr) > 1:
-                        tokens.append(child.func.attr)
-            
-            # String literals (docstrings, meaningful strings)
-            elif isinstance(child, ast.Constant) and isinstance(child.value, str):
-                # Only include strings that look meaningful (not too short, not just whitespace)
-                s = child.value.strip()
-                if len(s) > 3 and not s.startswith('http'):
-                    # Take first few words
-                    words = s.split()[:5]
-                    tokens.extend([w.lower() for w in words if len(w) > 2])
-            
-            # Import statements
-            elif isinstance(child, ast.Import):
-                for alias in child.names:
-                    if alias.name:
-                        # Extract module name parts
-                        parts = alias.name.split('.')
-                        tokens.extend([p for p in parts if len(p) > 1])
-            
-            elif isinstance(child, ast.ImportFrom):
-                if child.module:
-                    parts = child.module.split('.')
-                    tokens.extend([p for p in parts if len(p) > 1])
-                for alias in child.names:
-                    if alias.name and len(alias.name) > 1:
-                        tokens.append(alias.name)
-        
-        # Remove duplicates, filter out common Python keywords
-        python_keywords = {
-            'def', 'if', 'else', 'elif', 'for', 'while', 'return', 'import',
-            'from', 'as', 'try', 'except', 'finally', 'with', 'pass', 'break',
-            'continue', 'class', 'is', 'in', 'and', 'or', 'not', 'True', 'False',
-            'None', 'print', 'len', 'str', 'int', 'float', 'list', 'dict', 'set'
-        }
-        
-        tokens = [t.lower() for t in tokens if t.lower() not in python_keywords]
-        return list(set(tokens))
-    
-    def _normalize_docstring(self, docstring: Optional[str]) -> Optional[str]:
-        """
-        Normalize docstring by extracting first sentence and cleaning.
-        
-        Removes common boilerplate and takes the first meaningful sentence.
-        """
-        if not docstring:
-            return None
-        
-        # Remove leading/trailing whitespace
-        doc = docstring.strip()
-        
-        # Remove common docstring markers
-        doc = re.sub(r'^"""\s*', '', doc)
-        doc = re.sub(r'\s*"""$', '', doc)
-        doc = re.sub(r"^'''\s*", '', doc)
-        doc = re.sub(r"\s*'''$", '', doc)
-        
-        # Extract first sentence (up to first period, exclamation, or question mark)
-        first_sentence = re.split(r'[.!?]\s+', doc)[0]
-        first_sentence = first_sentence.strip()
-        
-        # Limit length
-        if len(first_sentence) > 200:
-            first_sentence = first_sentence[:200]
-        
-        return first_sentence if first_sentence else None
-    
-    def _build_logic_text(self, tokens: List[str], max_tokens: int = 50) -> str:
-        """
-        Build a text representation from extracted tokens.
-        
-        Joins tokens into a space-separated string, limiting the number.
-        """
-        # Take most relevant tokens (limit to avoid noise)
-        tokens = tokens[:max_tokens]
-        return ' '.join(tokens)
-    
-    def _compute_similarity(self, text1: str, text2: str) -> float:
-        """
-        Compute cosine similarity between two texts using embeddings.
-        
-        Returns similarity score between 0 and 1.
-        """
-        if not self.model:
-            # Fallback: simple word overlap
-            words1 = set(text1.lower().split())
-            words2 = set(text2.lower().split())
-            if not words1 or not words2:
-                return 0.0
-            intersection = words1.intersection(words2)
-            union = words1.union(words2)
-            return len(intersection) / len(union) if union else 0.0
-        
         try:
-            embeddings = self.model.encode([text1, text2], convert_to_tensor=True)
-            similarity = util.cos_sim(embeddings[0], embeddings[1]).item()
-            return float(similarity)
-        except Exception as e:
-            logger.error(f"Error computing similarity: {e}")
-            return 0.0
-    
-    def _batch_compute_similarities(
-        self, 
-        text_pairs: List[Tuple[str, str]]
-    ) -> List[float]:
-        """
-        Compute similarities for multiple text pairs in batches.
-        
-        More efficient than computing one-by-one.
-        """
-        if not self.model:
-            return [self._compute_similarity(t1, t2) for t1, t2 in text_pairs]
-        
-        similarities = []
-        for i in range(0, len(text_pairs), self.batch_size):
-            batch = text_pairs[i:i + self.batch_size]
-            texts1 = [t1 for t1, _ in batch]
-            texts2 = [t2 for _, t2 in batch]
-            
+            # Try UTF-8 first
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except UnicodeDecodeError:
+            # Try with error handling
             try:
-                embeddings1 = self.model.encode(texts1, convert_to_tensor=True)
-                embeddings2 = self.model.encode(texts2, convert_to_tensor=True)
-                batch_similarities = util.cos_sim(embeddings1, embeddings2)
-                
-                # Extract diagonal (pairwise similarities)
-                for j in range(len(batch)):
-                    similarities.append(batch_similarities[j][j].item())
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    logger.warning(f"Read {file_path} with encoding errors ignored")
+                    return content
             except Exception as e:
-                logger.error(f"Error in batch similarity computation: {e}")
-                # Fallback to individual computation
-                for t1, t2 in batch:
-                    similarities.append(self._compute_similarity(t1, t2))
-        
-        return similarities
+                logger.warning(f"Failed to read {file_path}: {e}")
+                return None
+        except Exception as e:
+            logger.warning(f"Failed to read {file_path}: {e}")
+            return None
     
-    def _determine_severity(
-        self, 
-        similarity: float, 
-        function_name: str,
-        doc_text: Optional[str],
-        logic_text: str
-    ) -> Tuple[str, str]:
+    def parse_ast_safely(self, content: str, file_path: str) -> Optional[ast.AST]:
         """
-        Determine severity and issue message based on similarity and heuristics.
+        Parse Python code into AST safely.
         
-        Returns: (severity, issue_message)
+        Returns:
+            AST node, or None if parsing fails.
         """
-        # Security-related heuristics
-        security_keywords = ['encrypt', 'hash', 'sign', 'decrypt', 'crypto', 'secure', 'password', 'token', 'auth']
-        name_lower = function_name.lower()
-        logic_lower = logic_text.lower()
-        
-        # Check for security-related function names
-        has_security_name = any(kw in name_lower for kw in security_keywords)
-        has_security_doc = doc_text and any(kw in doc_text.lower() for kw in security_keywords) if doc_text else False
-        
-        # Check if logic uses insecure methods
-        insecure_patterns = ['base64', 'b64encode', 'b64decode', 'md5', 'sha1']
-        uses_insecure = any(pattern in logic_lower for pattern in insecure_patterns)
-        
-        if (has_security_name or has_security_doc) and uses_insecure:
-            return (
-                "High",
-                "Function name/docstring implies security (encryption/hashing) but implementation uses insecure methods (base64/MD5/SHA1)"
-            )
-        
-        # Similarity-based severity
-        if similarity < self.thresholds['high']:
-            if not doc_text:
-                return (
-                    "High",
-                    "Function name does not match implementation logic (missing docstring)"
-                )
-            return (
-                "High",
-                "Docstring and implementation logic show significant mismatch"
-            )
-        elif similarity < self.thresholds['medium']:
-            if not doc_text:
-                return (
-                    "Medium",
-                    "Function name partially matches implementation logic (missing docstring)"
-                )
-            return (
-                "Medium",
-                "Docstring and implementation logic show moderate mismatch"
-            )
-        else:
-            # Similarity is OK, but check for other issues
-            if not doc_text:
-                return (
-                    "Low",
-                    "Missing docstring (function name matches logic)"
-                )
-            return None, None  # No issue
+        try:
+            return ast.parse(content, filename=file_path)
+        except SyntaxError as e:
+            logger.debug(f"Syntax error in {file_path}: {e}. Skipping (Static Agent handles this).")
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to parse AST for {file_path}: {e}")
+            return None
     
-    def _extract_function_info(self, node: ast.FunctionDef, file_path: str, source_lines: List[str]) -> Dict[str, Any]:
+    def is_trivial_function(self, func_node: ast.FunctionDef) -> bool:
         """
-        Extract all relevant information from a function AST node.
+        Check if a function is trivial (one-liner or empty).
         
-        Returns dict with function metadata.
+        Skip trivial functions to avoid noise.
         """
-        func_name = node.name
-        docstring = ast.get_docstring(node)
+        if not func_node.body:
+            return True
         
-        # Extract tokens from function body
-        tokens = self._extract_tokens_from_ast(node)
-        logic_text = self._build_logic_text(tokens)
-        
-        # Normalize texts
-        name_text = self._normalize_function_name(func_name)
-        doc_text = self._normalize_docstring(docstring)
-        
-        # Extract code snippet for evidence (first few lines of body)
-        code_snippet = None
-        if hasattr(node, 'lineno') and node.lineno:
-            try:
-                start_line = node.lineno - 1  # 0-indexed
-                end_line = min(start_line + 5, len(source_lines))
-                code_snippet = '\n'.join(source_lines[start_line:end_line])
-            except Exception:
-                pass
-        
-        return {
-            'name': func_name,
-            'name_text': name_text,
-            'docstring': docstring,
-            'doc_text': doc_text,
-            'tokens': tokens,
-            'logic_text': logic_text,
-            'code_snippet': code_snippet,
-            'file_path': file_path,
-            'line_number': node.lineno if hasattr(node, 'lineno') else None
-        }
-    
-    def _should_skip_file(self, file_path: str) -> bool:
-        """Determine if a file should be skipped."""
-        # Skip test files if configured
-        if self.skip_test_files:
-            test_patterns = ['test_', '_test.py', 'tests/', '/test/']
-            if any(pattern in file_path for pattern in test_patterns):
+        # Check if function is just a pass or return statement
+        if len(func_node.body) == 1:
+            first_stmt = func_node.body[0]
+            if isinstance(first_stmt, ast.Pass):
+                return True
+            if isinstance(first_stmt, ast.Return) and first_stmt.value is None:
                 return True
         
-        # Skip files in excluded directories
-        path_parts = file_path.replace('\\', '/').split('/')
-        for part in path_parts:
-            if part in self.skip_dirs:
-                return True
+        # Check if it's a one-liner utility
+        if len(func_node.body) <= 1:
+            return True
         
         return False
     
-    def _walk_repository(self, repo_path: str) -> List[str]:
+    def extract_imports(self, tree: ast.AST) -> Set[str]:
         """
-        Walk repository and collect Python file paths.
-        
-        Returns list of file paths to analyze.
+        Extract all imported module names from AST.
         """
-        file_paths = []
-        
-        if not os.path.exists(repo_path):
-            logger.error(f"Repository path does not exist: {repo_path}")
-            return file_paths
-        
-        for root, dirs, files in os.walk(repo_path):
-            # Skip excluded directories
-            dirs[:] = [d for d in dirs if d not in self.skip_dirs]
-            
-            for filename in files:
-                if filename.endswith('.py'):
-                    file_path = os.path.join(root, filename)
-                    if not self._should_skip_file(file_path):
-                        file_paths.append(file_path)
-        
-        logger.info(f"Found {len(file_paths)} Python files to analyze")
-        return file_paths
+        imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.add(alias.name.split('.')[0])  # Get base module name
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    imports.add(node.module.split('.')[0])
+        return imports
     
-    def _parse_file(self, file_path: str) -> Tuple[Optional[ast.AST], List[str]]:
+    def extract_function_calls(self, node: ast.AST) -> Set[str]:
         """
-        Parse a Python file and return AST and source lines.
+        Recursively extract all function call names from AST node.
+        """
+        calls = set()
         
-        Returns: (ast_tree, source_lines) or (None, []) on error
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                if isinstance(child.func, ast.Name):
+                    calls.add(child.func.id)
+                elif isinstance(child.func, ast.Attribute):
+                    # Get attribute name (e.g., obj.method -> method)
+                    calls.add(child.func.attr)
+                    # Also get the base object if it's a name
+                    if isinstance(child.func.value, ast.Name):
+                        calls.add(child.func.value.id)
+        
+        return calls
+    
+    def extract_attributes(self, node: ast.AST) -> Set[str]:
         """
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                source = f.read()
-                source_lines = source.splitlines()
+        Extract attribute accesses from AST.
+        """
+        attributes = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Attribute):
+                attributes.add(child.attr)
+        return attributes
+    
+    def extract_variables(self, node: ast.AST) -> Set[str]:
+        """
+        Extract variable names from AST (assignments and usage).
+        """
+        variables = set()
+        
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Load)):
+                variables.add(child.id)
+        
+        return variables
+    
+    def extract_string_literals(self, node: ast.AST, min_length: int = 3) -> Set[str]:
+        """
+        Extract meaningful string literals from AST.
+        Skip very short strings (likely format strings or single chars).
+        """
+        strings = set()
+        for child in ast.walk(node):
+            # Python 3.8+ uses ast.Constant for string literals
+            if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                if len(child.value) >= min_length:
+                    strings.add(child.value)
+        return strings
+    
+    def extract_function_intent(self, func_node: ast.FunctionDef) -> Dict[str, Any]:
+        """
+        Extract intent signals from function:
+        1. Function name
+        2. Docstring (if exists)
+        3. Parameter names
+        """
+        intent = {
+            'name': func_node.name,
+            'docstring': None,
+            'params': []
+        }
+        
+        # Extract docstring (first expression string in body)
+        if func_node.body:
+            first_expr = func_node.body[0]
+            if isinstance(first_expr, ast.Expr):
+                # Python 3.8+ uses ast.Constant for string literals
+                if isinstance(first_expr.value, ast.Constant) and isinstance(first_expr.value.value, str):
+                    intent['docstring'] = first_expr.value.value
+        
+        # Extract parameter names
+        for arg in func_node.args.args:
+            intent['params'].append(arg.arg)
+        
+        return intent
+    
+    def extract_function_behavior(self, func_node: ast.FunctionDef, imports: Set[str]) -> Dict[str, Set[str]]:
+        """
+        Extract behavioral tokens from function body:
+        - Function calls
+        - Attributes
+        - Variable names
+        - Imported modules used
+        - String literals (meaningful)
+        """
+        behavior = {
+            'function_calls': self.extract_function_calls(func_node),
+            'attributes': self.extract_attributes(func_node),
+            'variables': self.extract_variables(func_node),
+            'imports_used': set(),
+            'string_literals': self.extract_string_literals(func_node)
+        }
+        
+        # Find which imports are actually used
+        all_tokens = (behavior['function_calls'] | 
+                     behavior['attributes'] | 
+                     behavior['variables'])
+        
+        for imp in imports:
+            if imp in all_tokens:
+                behavior['imports_used'].add(imp)
+        
+        return behavior
+    
+    def build_intent_text(self, intent: Dict[str, Any]) -> str:
+        """
+        Build intent text from function intent signals.
+        Priority order: docstring > function name > parameter names
+        """
+        parts = []
+        
+        # Priority 1: Docstring
+        if intent['docstring']:
+            parts.append(intent['docstring'])
+        
+        # Priority 2: Function name
+        parts.append(intent['name'])
+        
+        # Priority 3: Parameter names
+        if intent['params']:
+            parts.append(' '.join(intent['params']))
+        
+        return ' '.join(parts)
+    
+    def build_behavior_text(self, behavior: Dict[str, Set[str]]) -> str:
+        """
+        Build behavior text from logic tokens.
+        """
+        parts = []
+        
+        # Function calls (most important)
+        if behavior['function_calls']:
+            parts.extend(sorted(behavior['function_calls']))
+        
+        # Attributes
+        if behavior['attributes']:
+            parts.extend(sorted(behavior['attributes']))
+        
+        # Variables
+        if behavior['variables']:
+            parts.extend(sorted(behavior['variables']))
+        
+        # Imports used
+        if behavior['imports_used']:
+            parts.extend(sorted(behavior['imports_used']))
+        
+        # String literals (only meaningful ones)
+        if behavior['string_literals']:
+            # Take first few meaningful strings
+            meaningful_strings = [s for s in sorted(behavior['string_literals']) 
+                                if len(s) > 3 and not s.isdigit()][:5]
+            parts.extend(meaningful_strings)
+        
+        return ' '.join(parts)
+    
+    def check_security_heuristic(self, intent_text: str, behavior_text: str) -> Tuple[bool, Optional[str]]:
+        """
+        Check for security-related mismatches.
+        E.g., function claims encryption but uses base64.
+        
+        Returns:
+            (should_flag, reason)
+        """
+        intent_lower = intent_text.lower()
+        behavior_lower = behavior_text.lower()
+        
+        # Check if intent mentions security
+        has_security_intent = any(keyword in intent_lower for keyword in SECURITY_KEYWORDS)
+        
+        if has_security_intent:
+            # Check if behavior uses insecure methods
+            uses_insecure = any(method in behavior_lower for method in INSECURE_METHODS)
             
-            tree = ast.parse(source, filename=file_path)
-            return tree, source_lines
-        except SyntaxError as e:
-            logger.warning(f"Syntax error in {file_path}: {e}")
-            return None, []
+            if uses_insecure:
+                insecure_found = [m for m in INSECURE_METHODS if m in behavior_lower]
+                reason = f"Function name/docstring implies security (encryption/hashing) but implementation uses insecure methods ({', '.join(insecure_found)})"
+                return True, reason
+        
+        return False, None
+    
+    def compute_similarity(self, intent_text: str, behavior_text: str) -> float:
+        """
+        Compute semantic similarity between intent and behavior using embeddings.
+        
+        Returns:
+            Similarity score (0-1), or 0.5 if embeddings unavailable.
+        """
+        if not intent_text or not behavior_text:
+            return 0.5
+        
+        # Fallback: basic keyword matching if model unavailable
+        if not self.model:
+            intent_words = set(intent_text.lower().split())
+            behavior_words = set(behavior_text.lower().split())
+            if not intent_words or not behavior_words:
+                return 0.5
+            
+            intersection = intent_words & behavior_words
+            union = intent_words | behavior_words
+            return len(intersection) / len(union) if union else 0.5
+        
+        try:
+            # Get embeddings
+            intent_embedding = self.model.encode(intent_text, convert_to_tensor=False)
+            behavior_embedding = self.model.encode(behavior_text, convert_to_tensor=False)
+            
+            # Compute cosine similarity
+            try:
+                import numpy as np
+                similarity = np.dot(intent_embedding, behavior_embedding) / (
+                    np.linalg.norm(intent_embedding) * np.linalg.norm(behavior_embedding)
+                )
+                return float(similarity)
+            except ImportError:
+                # Fallback if numpy not available (shouldn't happen with sentence-transformers)
+                # Manual cosine similarity computation
+                dot_product = sum(a * b for a, b in zip(intent_embedding, behavior_embedding))
+                norm_intent = sum(a * a for a in intent_embedding) ** 0.5
+                norm_behavior = sum(b * b for b in behavior_embedding) ** 0.5
+                if norm_intent == 0 or norm_behavior == 0:
+                    return 0.5
+                similarity = dot_product / (norm_intent * norm_behavior)
+                return float(similarity)
+            
         except Exception as e:
-            logger.error(f"Error reading {file_path}: {e}")
-            return None, []
+            logger.warning(f"Error computing similarity: {e}")
+            # Fallback to keyword matching
+            intent_words = set(intent_text.lower().split())
+            behavior_words = set(behavior_text.lower().split())
+            if not intent_words or not behavior_words:
+                return 0.5
+            intersection = intent_words & behavior_words
+            union = intent_words | behavior_words
+            return len(intersection) / len(union) if union else 0.5
+    
+    def determine_severity(self, similarity: float, security_issue: bool) -> str:
+        """
+        Determine issue severity based on similarity score and security flags.
+        """
+        if security_issue:
+            return "High"
+        
+        if similarity < SIMILARITY_THRESHOLD_LOW:
+            return "High"
+        elif similarity < SIMILARITY_THRESHOLD_MEDIUM:
+            return "Medium"
+        else:
+            return "Low"
+    
+    def should_report_issue(self, func_name: str, intent_text: str, behavior_text: str, 
+                          similarity: float, security_issue: bool) -> Tuple[bool, Optional[str]]:
+        """
+        Decide whether to report an issue for this function.
+        
+        Returns:
+            (should_report, reason)
+        """
+        # Skip if name is too generic
+        if func_name.lower() in GENERIC_NAMES or func_name.lower().startswith('test_'):
+            return False, None
+        
+        # Skip if behavior is empty
+        if not behavior_text or len(behavior_text.strip()) < 3:
+            return False, None
+        
+        # Always report security issues
+        if security_issue:
+            return True, "Security heuristic triggered"
+        
+        # Report if similarity is below threshold
+        if similarity < SIMILARITY_THRESHOLD_MEDIUM:
+            if similarity < SIMILARITY_THRESHOLD_LOW:
+                return True, f"Strong mismatch between intent and implementation (similarity: {similarity:.2f})"
+            else:
+                return True, f"Partial mismatch between intent and implementation (similarity: {similarity:.2f})"
+        
+        return False, None
+    
+    def analyze_function(self, func_node: ast.FunctionDef, file_path: str, 
+                        imports: Set[str], source_lines: List[str]) -> Optional[Dict[str, Any]]:
+        """
+        Analyze a single function for semantic mismatches.
+        
+        Returns:
+            Issue dict if found, None otherwise.
+        """
+        # Skip trivial functions
+        if self.is_trivial_function(func_node):
+            return None
+        
+        # Extract intent and behavior
+        intent = self.extract_function_intent(func_node)
+        behavior = self.extract_function_behavior(func_node, imports)
+        
+        # Build comparison texts
+        intent_text = self.build_intent_text(intent)
+        behavior_text = self.build_behavior_text(behavior)
+        
+        # Skip if no meaningful intent or behavior
+        if not intent_text or not behavior_text:
+            return None
+        
+        # Check security heuristics
+        security_issue, security_reason = self.check_security_heuristic(intent_text, behavior_text)
+        
+        # Compute similarity
+        similarity = self.compute_similarity(intent_text, behavior_text)
+        
+        # Decide if we should report
+        should_report, reason = self.should_report_issue(
+            intent['name'], intent_text, behavior_text, similarity, security_issue
+        )
+        
+        if not should_report:
+            return None
+        
+        # Build issue object
+        issue = {
+            'file': file_path,
+            'function': intent['name'],
+            'line_number': func_node.lineno,
+            'severity': self.determine_severity(similarity, security_issue),
+            'similarity': round(similarity, 3),
+            'issue': reason or security_reason or f"Mismatch between function intent and implementation",
+            'evidence': {
+                'intent_text': intent_text[:200],  # Truncate for display
+                'behavior_tokens': {
+                    'function_calls': list(behavior['function_calls'])[:10],
+                    'attributes': list(behavior['attributes'])[:10],
+                    'imports_used': list(behavior['imports_used'])[:10]
+                }
+            }
+        }
+        
+        # Add code snippet (first few lines of function)
+        try:
+            end_line = func_node.end_lineno if hasattr(func_node, 'end_lineno') else func_node.lineno + 5
+            snippet_lines = source_lines[func_node.lineno - 1:min(end_line, func_node.lineno + 10)]
+            issue['evidence']['code_snippet'] = '\n'.join(snippet_lines[:15])
+        except:
+            pass
+        
+        return issue
+    
+    def analyze_file(self, file_path: Path) -> List[Dict[str, Any]]:
+        """
+        Analyze a single Python file for semantic issues.
+        
+        Returns:
+            List of issues found.
+        """
+        issues = []
+        
+        # Skip test files
+        if self.should_skip_file(str(file_path)):
+            return issues
+        
+        # Read file safely
+        content = self.read_file_safely(file_path)
+        if not content:
+            return issues
+        
+        # Parse AST
+        tree = self.parse_ast_safely(content, str(file_path))
+        if not tree:
+            return issues
+        
+        # Get source lines for snippets
+        source_lines = content.splitlines()
+        
+        # Extract imports at file level
+        imports = self.extract_imports(tree)
+        
+        # Extract all function definitions
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                issue = self.analyze_function(node, str(file_path), imports, source_lines)
+                if issue:
+                    issues.append(issue)
+        
+        return issues
+    
+    def analyze_repository_with_session(
+        self, 
+        temp_folder: str, 
+        session_id: str, 
+        results_base_folder: str
+    ) -> Dict[str, Any]:
+        """
+        Analyze repository using existing temp folder and session_id.
+        
+        Args:
+            temp_folder: Path to temp folder with collected files
+            session_id: Session ID for this analysis
+            results_base_folder: Base folder for results
+            
+        Returns:
+            Dictionary with issues and summary
+        """
+        logger.info(f"Starting semantic analysis for session: {session_id}")
+        
+        temp_folder_path = Path(temp_folder)
+        if not temp_folder_path.exists():
+            logger.warning(f"Temp folder does not exist: {temp_folder}")
+            return {
+                "agent": "SCAA",
+                "session_id": session_id,
+                "issues": [],
+                "summary": {
+                    "total_files": 0,
+                    "files_analyzed": 0,
+                    "functions_analyzed": 0,
+                    "issues_found": 0,
+                    "average_similarity": 0.0
+                }
+            }
+        
+        # Get all Python files from temp folder
+        collected_files = [str(f.relative_to(temp_folder_path)) 
+                          for f in temp_folder_path.rglob("*.py")]
+        
+        if not collected_files:
+            logger.warning("No Python files found in temp folder")
+            return {
+                "agent": "SCAA",
+                "session_id": session_id,
+                "issues": [],
+                "summary": {
+                    "total_files": 0,
+                    "files_analyzed": 0,
+                    "functions_analyzed": 0,
+                    "issues_found": 0,
+                    "average_similarity": 0.0
+                }
+            }
+        
+        logger.info(f"Found {len(collected_files)} Python files")
+        
+        # Analyze each file
+        all_issues = []
+        total_functions = 0
+        similarity_scores = []
+        files_analyzed_count = 0
+        
+        for relative_file in collected_files:
+            file_path = temp_folder_path / relative_file
+            if not file_path.exists():
+                continue
+            
+            try:
+                file_issues = self.analyze_file(file_path, relative_path=str(relative_file))
+                all_issues.extend(file_issues)
+                files_analyzed_count += 1
+                
+                # Count functions
+                content = self.read_file_safely(file_path)
+                if content:
+                    tree = self.parse_ast_safely(content, str(file_path))
+                    if tree:
+                        functions_in_file = sum(1 for n in ast.walk(tree) if isinstance(n, ast.FunctionDef))
+                        total_functions += functions_in_file
+                
+                # Collect similarity scores
+                for issue in file_issues:
+                    if 'similarity' in issue:
+                        similarity_scores.append(issue['similarity'])
+                
+                logger.info(f"Analyzed {relative_file}: {len(file_issues)} issues found")
+            except Exception as e:
+                logger.warning(f"Error analyzing {relative_file}: {e}")
+                continue
+        
+        # Build summary
+        avg_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+        
+        summary = {
+            "total_files": len(collected_files),
+            "files_analyzed": files_analyzed_count,
+            "functions_analyzed": total_functions,
+            "issues_found": len(all_issues),
+            "average_similarity": round(avg_similarity, 3)
+        }
+        
+        logger.info(f"Semantic analysis complete: {len(all_issues)} issues found")
+        
+        result = {
+            "agent": "SCAA",
+            "session_id": session_id,
+            "issues": all_issues,
+            "summary": summary
+        }
+        
+        # Save results to JSON file
+        self._save_results(result, session_id, results_base_folder)
+        
+        return result
     
     def analyze_repository(self, repo_path: str) -> Dict[str, Any]:
         """
-        Main analysis function - analyzes entire repository.
+        Analyze an entire repository for semantic issues.
         
         Args:
-            repo_path: Root path to the repository
+            repo_path: Path to repository directory
             
         Returns:
-            Structured report with issues and summary
+            Dictionary with issues and summary
         """
         logger.info(f"Starting semantic analysis of repository: {repo_path}")
         
-        # Walk repository
-        file_paths = self._walk_repository(repo_path)
+        # Collect Python files
+        logger.info("Collecting Python files...")
+        base_temp_folder = os.path.join(os.path.dirname(__file__), "temp")
+        collected_files, stats, session_id = collect_python_files(repo_path, base_temp_folder)
         
-        if not file_paths:
+        if not collected_files:
+            logger.warning("No Python files found to analyze")
             return {
                 "agent": "SCAA",
                 "issues": [],
                 "summary": {
-                    "total_functions": 0,
-                    "flagged_count": 0,
-                    "avg_similarity": 0.0,
-                    "files_analyzed": 0
+                    "total_files": 0,
+                    "files_analyzed": 0,
+                    "functions_analyzed": 0,
+                    "issues_found": 0,
+                    "average_similarity": 0.0
                 }
             }
         
-        # Collect all functions
-        all_functions = []
+        logger.info(f"Found {len(collected_files)} Python files")
         
-        for file_path in file_paths:
-            tree, source_lines = self._parse_file(file_path)
-            if not tree:
+        # Analyze each file
+        all_issues = []
+        total_functions = 0
+        similarity_scores = []
+        files_analyzed_count = 0
+        
+        temp_folder = Path(base_temp_folder) / session_id
+        
+        for relative_file in collected_files:
+            file_path = temp_folder / relative_file
+            if not file_path.exists():
                 continue
             
-            # Extract functions from AST
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    # Skip private/internal functions if desired (optional)
-                    # if node.name.startswith('_') and not node.name.startswith('__'):
-                    #     continue
-                    
-                    func_info = self._extract_function_info(node, file_path, source_lines)
-                    all_functions.append(func_info)
-        
-        logger.info(f"Extracted {len(all_functions)} functions")
-        
-        if not all_functions:
-            return {
-                "agent": "SCAA",
-                "issues": [],
-                "summary": {
-                    "total_functions": 0,
-                    "flagged_count": 0,
-                    "avg_similarity": 0.0,
-                    "files_analyzed": len(set(f['file_path'] for f in all_functions))
-                }
-            }
-        
-        # Compute similarities and identify issues
-        issues = []
-        similarities = []
-        
-        # Prepare text pairs for batch processing
-        text_pairs = []
-        function_metadata = []
-        
-        for func_info in all_functions:
-            doc_text = func_info['doc_text']
-            name_text = func_info['name_text']
-            logic_text = func_info['logic_text']
-            
-            if doc_text:
-                # Primary: compare docstring vs logic
-                text_pairs.append((doc_text, logic_text))
-                function_metadata.append({
-                    'func_info': func_info,
-                    'comparison_type': 'doc_logic',
-                    'fallback': False
-                })
-            else:
-                # Fallback: compare name vs logic
-                text_pairs.append((name_text, logic_text))
-                function_metadata.append({
-                    'func_info': func_info,
-                    'comparison_type': 'name_logic',
-                    'fallback': True
-                })
-        
-        # Batch compute similarities
-        logger.info("Computing semantic similarities...")
-        similarity_scores = self._batch_compute_similarities(text_pairs)
-        
-        # Process results and form issues
-        for i, (func_meta, similarity) in enumerate(zip(function_metadata, similarity_scores)):
-            func_info = func_meta['func_info']
-            similarities.append(similarity)
-            
-            # Determine severity and issue message
-            severity, issue_msg = self._determine_severity(
-                similarity,
-                func_info['name'],
-                func_info['doc_text'],
-                func_info['logic_text']
-            )
-            
-            if severity:  # Issue detected
-                # Build evidence
-                evidence = {
-                    'function_name': func_info['name'],
-                    'similarity_score': round(similarity, 3),
-                    'docstring': func_info['docstring'],
-                    'logic_tokens': func_info['tokens'][:20],  # First 20 tokens
-                    'code_snippet': func_info['code_snippet']
-                }
+            try:
+                file_issues = self.analyze_file(file_path)
+                all_issues.extend(file_issues)
+                files_analyzed_count += 1
                 
-                issues.append({
-                    'file': func_info['file_path'],
-                    'function': func_info['name'],
-                    'issue': issue_msg,
-                    'severity': severity,
-                    'similarity': round(similarity, 3),
-                    'evidence': evidence,
-                    'line_number': func_info['line_number']
-                })
+                # Count functions (approximate)
+                content = self.read_file_safely(file_path)
+                if content:
+                    tree = self.parse_ast_safely(content, str(file_path))
+                    if tree:
+                        functions_in_file = sum(1 for n in ast.walk(tree) if isinstance(n, ast.FunctionDef))
+                        total_functions += functions_in_file
+                
+                # Collect similarity scores
+                for issue in file_issues:
+                    if 'similarity' in issue:
+                        similarity_scores.append(issue['similarity'])
+                
+                logger.info(f"Analyzed {relative_file}: {len(file_issues)} issues found")
+            except Exception as e:
+                logger.warning(f"Error analyzing {relative_file}: {e}")
+                continue
         
         # Build summary
-        avg_similarity = sum(similarities) / len(similarities) if similarities else 0.0
-        unique_files = len(set(f['file_path'] for f in all_functions))
+        avg_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
         
         summary = {
-            'total_functions': len(all_functions),
-            'flagged_count': len(issues),
-            'avg_similarity': round(avg_similarity, 3),
-            'files_analyzed': unique_files
+            "total_files": len(collected_files),
+            "files_analyzed": files_analyzed_count,
+            "functions_analyzed": total_functions,
+            "issues_found": len(all_issues),
+            "average_similarity": round(avg_similarity, 3)
         }
         
-        logger.info(f"Analysis complete: {len(issues)} issues found in {len(all_functions)} functions")
+        logger.info(f"Semantic analysis complete: {len(all_issues)} issues found")
         
-        return {
+        result = {
             "agent": "SCAA",
-            "issues": issues,
+            "session_id": session_id,
+            "issues": all_issues,
             "summary": summary
         }
+        
+        # Save results to JSON file
+        self._save_results(result, session_id)
+        
+        return result
+    
+    def _save_results(self, results: Dict[str, Any], session_id: str, results_base_folder: str = None) -> None:
+        """Save analysis results to JSON file in results folder."""
+        try:
+            if results_base_folder is None:
+                results_base_folder = os.path.join(os.path.dirname(__file__), "results")
+            results_folder = Path(results_base_folder) / session_id
+            results_folder.mkdir(parents=True, exist_ok=True)
+            
+            output_file = results_folder / "semantic_agent.json"
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Semantic agent results saved to: {output_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save semantic agent results: {e}")
 
 
-def analyze_semantic(repo_path: str, **kwargs) -> Dict[str, Any]:
+def analyze_semantic(repo_path: str) -> Dict[str, Any]:
     """
-    Public API function for semantic analysis.
+    Main entry point for semantic analysis.
+    
+    This function is called by the orchestrator.
     
     Args:
-        repo_path: Root path to the repository
-        **kwargs: Optional configuration (model_name, thresholds, etc.)
-    
+        repo_path: Path to repository directory
+        
     Returns:
-        Structured report with issues and summary
+        Dictionary with SCAA analysis results
     """
-    analyzer = SemanticAnalyzer(**kwargs)
+    analyzer = SemanticAnalyzer()
     return analyzer.analyze_repository(repo_path)
 
 
-# For testing/standalone execution
+# For testing
 if __name__ == "__main__":
     import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python semantic_agent.py <repo_path>")
+        sys.exit(1)
+    
+    repo_path = sys.argv[1]
+    results = analyze_semantic(repo_path)
+    
     import json
-    
-    if len(sys.argv) > 1:
-        repo_path = sys.argv[1]
-    else:
-        repo_path = os.getcwd()
-    
-    logger.info(f"Analyzing repository: {repo_path}")
-    result = analyze_semantic(repo_path)
-    
-    # Output as JSON
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print(json.dumps(results, indent=2, ensure_ascii=False))
+

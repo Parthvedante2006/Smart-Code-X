@@ -1,0 +1,10 @@
+{
+  "agent": "HDVA",
+  "session_id": "20251218_153702_23f6514d",
+  "issues": [],
+  "summary": {
+    "total_files": 1,
+    "files_analyzed": 1,
+    "hallucinations_found": 0
+  }
+}
