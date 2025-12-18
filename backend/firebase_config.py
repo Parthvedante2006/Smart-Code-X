@@ -7,14 +7,24 @@ load_dotenv()
 
 # Initialize Firebase App
 if not firebase_admin._apps:
-    cred_path = "serviceAccountKey.json"
-    if os.path.exists(cred_path):
-        cred = credentials.Certificate(cred_path)
+    cred = None
+    # Check potential paths for credentials (Local vs Render Secret)
+    possible_paths = ["serviceAccountKey.json", "/etc/secrets/serviceAccountKey.json"]
+    for path in possible_paths:
+        if os.path.exists(path):
+            try:
+                cred = credentials.Certificate(path)
+                print(f"Loaded Firebase credentials from: {path}")
+                break
+            except Exception as e:
+                print(f"Error loading credentials from {path}: {e}")
+    
+    if cred:
         firebase_admin.initialize_app(cred, {
             'storageBucket': os.getenv('FIREBASE_STORAGE_BUCKET')
         })
     else:
-        print("Warning: serviceAccountKey.json not found. Firebase features will not work.")
+        print("Warning: serviceAccountKey.json not found in search paths. Firebase features will not work.")
 
 def get_firestore_db():
     try:
