@@ -24,19 +24,12 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'static_agent_files'))
 from collect_python_files import collect_python_files
 
-# Import sentence-transformers for embeddings
-try:
-    from sentence_transformers import SentenceTransformer
-    EMBEDDINGS_AVAILABLE = True
-except ImportError:
-    EMBEDDINGS_AVAILABLE = False
-    logging.warning("sentence-transformers not available. Semantic analysis will be limited.")
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 # Similarity thresholds
+EMBEDDINGS_AVAILABLE = True
 SIMILARITY_THRESHOLD_LOW = 0.40
 SIMILARITY_THRESHOLD_MEDIUM = 0.65
 
@@ -70,6 +63,18 @@ class SemanticAnalyzer:
     def __init__(self):
         """Initialize the semantic analyzer. Model is loaded lazily."""
         self.model = None
+
+    def _load_model_if_needed(self):
+        """Lazy load the model only when analysis is requested."""
+        if self.model is None and EMBEDDINGS_AVAILABLE:
+            try:
+                logger.info("Lazy loading sentence-transformers model...")
+                from sentence_transformers import SentenceTransformer
+                self.model = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("Model loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load embedding model: {e}")
+                self.model = None
 
     
     def should_skip_file(self, file_path: str) -> bool:
