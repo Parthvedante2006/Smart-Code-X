@@ -189,7 +189,7 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={handleDownloadReport} variant="outline" className="border-primary/20 hover:bg-primary/5 text-primary">
+          <Button size="sm" onClick={handleDownloadReport} variant="outline" className="border-primary text-primary hover:bg-primary hover:text-white transition-all">
             <Download className="mr-2 h-4 w-4" />
             Download Report
           </Button>
@@ -372,18 +372,48 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
-                  <span className="text-sm">Issues Found</span>
-                  <span className="font-bold">{scaaSummary.issues_found ?? 0}</span>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
+                    <span className="text-sm">Issues Found</span>
+                    <span className="font-bold">{scaaSummary.issues_found ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
+                    <span className="text-sm">Files Analyzed</span>
+                    <span className="font-bold">{scaaSummary.files_analyzed ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
+                    <span className="text-sm">Avg Similarity</span>
+                    <span className="font-bold">{(scaaSummary.average_similarity ?? 0).toFixed(2)}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
-                  <span className="text-sm">Files Analyzed</span>
-                  <span className="font-bold">{scaaSummary.files_analyzed ?? 0}</span>
-                </div>
-                <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
-                  <span className="text-sm">Avg Similarity</span>
-                  <span className="font-bold">{(scaaSummary.average_similarity ?? 0).toFixed(2)}</span>
-                </div>
+
+                {rawData?.SCAA?.issues?.length > 0 ? (
+                  <div className="mt-4 space-y-3">
+                    <h3 className="text-sm font-semibold text-muted-foreground">Detected Issues</h3>
+                    {rawData.SCAA.issues.map((issue: any, idx: number) => (
+                      <div key={idx} className="p-3 border rounded-lg bg-background/50 text-sm space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="font-mono font-bold text-primary">{issue.function}()</div>
+                          <Badge variant="outline" className={cn(
+                            issue.severity === 'High' ? 'text-orange-500 border-orange-500/20' :
+                              issue.severity === 'Medium' ? 'text-amber-500 border-amber-500/20' :
+                                'text-emerald-500 border-emerald-500/20'
+                          )}>
+                            {issue.severity} (Sim: {issue.similarity})
+                          </Badge>
+                        </div>
+                        <div className="text-muted-foreground">
+                          <span className="font-mono text-xs">{issue.file}:{issue.line_number}</span>
+                        </div>
+                        <p>{issue.issue}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-sm text-muted-foreground mt-4">
+                    No semantic issues found. Function intents match implementations.
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
