@@ -83,12 +83,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @app.get("/auth/google/login")
 async def login_google():
-    redirect_uri = "http://localhost:8000/auth/google/callback"
+    redirect_uri = f"{BACKEND_URL}/auth/google/callback"
     return RedirectResponse(await auth.get_google_auth_url(redirect_uri))
 
 @app.get("/auth/google/callback")
 async def callback_google(code: str):
-    redirect_uri = "http://localhost:8000/auth/google/callback"
+    redirect_uri = f"{BACKEND_URL}/auth/google/callback"
     async with httpx.AsyncClient() as client:
         try:
             user_info = await auth.exchange_google_code(code, redirect_uri, client)
@@ -115,16 +115,16 @@ async def callback_google(code: str):
     access_token = auth.create_access_token(data={"sub": user.email})
     
     # Redirect to frontend with token
-    return RedirectResponse(f"http://localhost:5173/auth/callback?token={access_token}")
+    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={access_token}")
 
 @app.get("/auth/github/login")
 async def login_github():
-    redirect_uri = "http://localhost:8000/auth/github/callback"
+    redirect_uri = f"{BACKEND_URL}/auth/github/callback"
     return RedirectResponse(await auth.get_github_auth_url(redirect_uri))
 
 @app.get("/auth/github/callback")
 async def callback_github(code: str):
-    redirect_uri = "http://localhost:8000/auth/github/callback"
+    redirect_uri = f"{BACKEND_URL}/auth/github/callback"
     async with httpx.AsyncClient() as client:
         try:
              user_info = await auth.exchange_github_code(code, redirect_uri, client)
@@ -151,7 +151,7 @@ async def callback_github(code: str):
     access_token = auth.create_access_token(data={"sub": user.email})
     
     # Redirect to frontend with token
-    return RedirectResponse(f"http://localhost:5173/auth/callback?token={access_token}")
+    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={access_token}")
 
 @app.get("/auth/me")
 async def read_users_me(current_user: auth.User = Depends(get_current_user)):
