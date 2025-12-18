@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { mockApi } from '@/services/mockApi';
 import { useToast } from '@/hooks/use-toast';
 import type { ReviewResult, ReviewStep } from '@/types';
+import { api } from '@/services/api';
 
 type DashboardState = 'idle' | 'uploading' | 'processing' | 'complete';
 
@@ -30,62 +31,22 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchReviews = async () => {
       try {
-        const token = localStorage.getItem('smartcodex_token');
-        const response = await fetch('http://localhost:8000/reviews', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setReviews(data);
-        }
+        const data = await api.reviews.list();
+        setReviews(data);
       } catch (error) {
         console.error('Failed to fetch reviews:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load reviews",
+          variant: "destructive"
+        });
       }
     };
 
     if (user) {
       fetchReviews();
     }
-  }, [user]);
-
-  const simulateProcessing = useCallback(async () => {
-    const steps: ReviewStep[] = ['extracting', 'analyzing', 'reviewing', 'generating'];
-
-    for (let i = 0; i < steps.length; i++) {
-      setCurrentStep(steps[i]);
-      const startProgress = (i / steps.length) * 100;
-      const endProgress = ((i + 1) / steps.length) * 100;
-
-      for (let p = startProgress; p <= endProgress; p += 2) {
-        setProgress(p);
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-    }
-  }, []);
-
-  const saveReviewToBackend = async (review: ReviewResult) => {
-    try {
-      const token = localStorage.getItem('smartcodex_token');
-      await fetch('http://localhost:8000/reviews', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(review)
-      });
-      // Re-fetch or manually update state (state update is already done in handlers)
-    } catch (error) {
-      console.error('Failed to save review:', error);
-      toast({
-        title: "Warning",
-        description: "Review generated but failed to save to history.",
-        variant: "destructive"
-      });
-    }
-  };
+  }, [user, toast]);
 
   const handleFileUpload = useCallback(async (file: File) => {
     setState('uploading');
@@ -97,16 +58,21 @@ export default function Dashboard() {
         description: file.name,
       });
 
-      const uploadProgress = (p: number) => {
-        setProgress(p * 0.25);
-      };
+      // Fake progress while uploading/processing to keep UI alive
+      const interval = setInterval(() => {
+        setProgress(old => {
+          if (old >= 90) return 90;
+          return old + 10;
+        });
+      }, 500);
 
       setState('processing');
-      await simulateProcessing();
 
-      const reviewResult = await mockApi.review.upload(file, uploadProgress);
+      // Real API Call
+      const reviewResult = await api.reviews.uploadZip(file);
 
-      await saveReviewToBackend(reviewResult);
+      clearInterval(interval);
+      setProgress(100);
 
       setReviews(prev => [reviewResult, ...prev]);
       setSelectedReview(reviewResult);
@@ -125,42 +91,17 @@ export default function Dashboard() {
         variant: 'destructive',
       });
     }
-  }, [simulateProcessing, toast]);
+  }, [toast]);
 
+  // GitHub unimplemented in backend for now in the new flow, so we disable or keep mock for now
+  // Keeping mock or implementation plan todo
   const handleGithubSubmit = useCallback(async (url: string) => {
-    setState('processing');
-    setProgress(0);
-
-    try {
-      toast({
-        title: 'Fetching repository...',
-        description: url,
-      });
-
-      await simulateProcessing();
-
-      const reviewResult = await mockApi.review.github(url);
-
-      await saveReviewToBackend(reviewResult);
-
-      setReviews(prev => [reviewResult, ...prev]);
-      setSelectedReview(reviewResult);
-      setState('complete');
-      setShowUpload(false);
-
-      toast({
-        title: 'Analysis complete!',
-        description: `Found ${reviewResult.totalIssues} issues across ${reviewResult.totalFiles} files.`,
-      });
-    } catch (error) {
-      setState('idle');
-      toast({
-        title: 'Analysis failed',
-        description: error instanceof Error ? error.message : 'Something went wrong',
-        variant: 'destructive',
-      });
-    }
-  }, [simulateProcessing, toast]);
+    toast({
+      title: "Not Implemented",
+      description: "GitHub analysis is not yet connected to the new backend flow.",
+      variant: "destructive"
+    });
+  }, [toast]);
 
   const handleNewReview = useCallback(() => {
     setState('idle');
@@ -188,17 +129,7 @@ export default function Dashboard() {
     }
 
     try {
-      const token = localStorage.getItem('smartcodex_token');
-      const response = await fetch(`http://localhost:8000/reviews/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete review');
-      }
+      await api.reviews.delete(id);
 
       toast({
         title: "Review deleted",

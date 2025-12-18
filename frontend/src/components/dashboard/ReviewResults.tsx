@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Accordion,
   AccordionContent,
@@ -15,11 +16,14 @@ import {
   Zap,
   Code2,
   FileCode,
-  ChevronRight,
   Download,
   RefreshCw,
+  Lightbulb,
+  Search,
+  BrainCircuit,
+  CheckCircle2
 } from 'lucide-react';
-import type { ReviewResult, Severity, CodeIssue } from '@/types';
+import type { ReviewResult, Severity, CodeIssue, IERARecommendation } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface ReviewResultsProps {
@@ -32,13 +36,6 @@ const severityConfig: Record<Severity, { color: string; label: string }> = {
   medium: { color: 'bg-severity-medium', label: 'Medium' },
   high: { color: 'bg-severity-high', label: 'High' },
   critical: { color: 'bg-severity-critical', label: 'Critical' },
-};
-
-const categoryConfig: Record<CodeIssue['category'], { icon: typeof Shield; label: string }> = {
-  security: { icon: Shield, label: 'Security' },
-  performance: { icon: Zap, label: 'Performance' },
-  quality: { icon: Code2, label: 'Quality' },
-  maintainability: { icon: FileCode, label: 'Maintainability' },
 };
 
 function ScoreGauge({ score }: { score: number }) {
@@ -54,25 +51,10 @@ function ScoreGauge({ score }: { score: number }) {
   return (
     <div className="relative w-40 h-40">
       <svg className="w-full h-full transform -rotate-90">
+        <circle cx="80" cy="80" r="45" stroke="currentColor" strokeWidth="10" fill="none" className="text-muted" />
         <circle
-          cx="80"
-          cy="80"
-          r="45"
-          stroke="currentColor"
-          strokeWidth="10"
-          fill="none"
-          className="text-muted"
-        />
-        <circle
-          cx="80"
-          cy="80"
-          r="45"
-          stroke="currentColor"
-          strokeWidth="10"
-          fill="none"
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round"
+          cx="80" cy="80" r="45" stroke="currentColor" strokeWidth="10" fill="none"
+          strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round"
           className={cn('transition-all duration-1000', getScoreColor(score))}
         />
       </svg>
@@ -84,22 +66,53 @@ function ScoreGauge({ score }: { score: number }) {
   );
 }
 
-function SeverityBadge({ severity }: { severity: Severity }) {
+function RecommendationCard({ rec }: { rec: IERARecommendation }) {
   return (
-    <Badge
-      variant="outline"
-      className={cn(
-        'border-none text-white font-medium',
-        severityConfig[severity].color
-      )}
-    >
-      {severityConfig[severity].label}
-    </Badge>
+    <Card className="border-l-4 border-l-primary/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between">
+          <div>
+            <CardTitle className="text-lg">{rec.title}</CardTitle>
+            <CardDescription className="capitalize mt-1 flex items-center gap-2">
+              <Badge variant="outline">{rec.category}</Badge>
+              <Badge variant="secondary">Effort: {rec.effort}</Badge>
+              <Badge variant="secondary">Impact: {rec.impact}</Badge>
+            </CardDescription>
+          </div>
+          <div className="text-sm font-bold text-primary">{Math.round(rec.confidence * 100)}% Conf</div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <p className="text-muted-foreground">{rec.description}</p>
+
+        {rec.implementation_example && (
+          <div className="bg-muted p-3 rounded-md overflow-x-auto">
+            <pre className="text-xs font-mono">{rec.implementation_example}</pre>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <FileCode className="h-3 w-3" />
+          <span>Files: {rec.files.join(', ')}</span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
 export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
   const [expandedFiles, setExpandedFiles] = useState<string[]>([]);
+  const rawData = result.raw_analysis?.agents;
+
+  // IERA Recommendations
+  const recommendations = rawData?.IERA?.recommendations || [];
+
+  // HDVA
+  const hallucinations = rawData?.HDVA?.issues || [];
+  const hdvaSummary = rawData?.HDVA?.summary || {};
+
+  // SCAA
+  const scaaSummary = rawData?.SCAA?.summary || {};
 
   return (
     <div className="space-y-6">
@@ -112,10 +125,6 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm">
-            <Download className="mr-2 h-4 w-4" />
-            Export Report
-          </Button>
           <Button size="sm" onClick={onNewReview} className="bg-gradient-primary hover:opacity-90">
             <RefreshCw className="mr-2 h-4 w-4" />
             New Review
@@ -123,184 +132,174 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
         </div>
       </div>
 
-      {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Score Card */}
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardContent className="pt-6 flex flex-col items-center">
-            <ScoreGauge score={result.overallScore} />
-            <p className="text-center text-muted-foreground mt-4">
-              {result.overallScore >= 80
-                ? 'Great job! Your code is in good shape.'
-                : result.overallScore >= 60
-                  ? 'Some issues need attention.'
-                  : 'Critical issues found. Review recommended.'}
-            </p>
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="grid w-full grid-cols-4 lg:w-[600px]">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="issues">Issues</TabsTrigger>
+          <TabsTrigger value="recommendations">AI Insights</TabsTrigger>
+          <TabsTrigger value="deep_analysis">Deep Analysis</TabsTrigger>
+        </TabsList>
 
-        {/* Issues by Severity */}
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5" />
-              Issues by Severity
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {(Object.entries(result.issuesBySeverity) as [Severity, number][])
-              .reverse()
-              .map(([severity, count]) => (
-                <div key={severity} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className={cn('h-3 w-3 rounded-full', severityConfig[severity].color)} />
-                    <span className="capitalize">{severity}</span>
+        <TabsContent value="overview" className="space-y-6 mt-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <Card className="bg-card/50 backdrop-blur-sm">
+              <CardContent className="pt-6 flex flex-col items-center">
+                <ScoreGauge score={result.overallScore} />
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/50 backdrop-blur-sm lg:col-span-2">
+              <CardHeader>
+                <CardTitle>Analysis Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground text-lg leading-relaxed">
+                  {result.summary}
+                </p>
+                <div className="grid grid-cols-3 gap-4 mt-6">
+                  <div className="p-4 rounded-lg bg-background/50 border">
+                    <div className="text-2xl font-bold">{result.totalIssues}</div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Total Issues</div>
                   </div>
-                  <span className="font-semibold">{count}</span>
+                  <div className="p-4 rounded-lg bg-background/50 border">
+                    <div className="text-2xl font-bold">{recommendations.length}</div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">AI Suggestions</div>
+                  </div>
+                  <div className="p-4 rounded-lg bg-background/50 border">
+                    <div className="text-2xl font-bold">{hallucinations.length}</div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Hallucinations</div>
+                  </div>
                 </div>
-              ))}
-            <div className="pt-2 border-t border-border">
-              <div className="flex items-center justify-between font-medium">
-                <span>Total Issues</span>
-                <span>{result.totalIssues}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
-        {/* Issues by Category */}
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Code2 className="h-5 w-5" />
-              Issues by Category
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {(Object.entries(result.issuesByCategory) as [CodeIssue['category'], number][]).map(
-              ([category, count]) => {
-                const config = categoryConfig[category];
-                return (
-                  <div key={category} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <config.icon className="h-4 w-4 text-muted-foreground" />
-                      <span>{config.label}</span>
-                    </div>
-                    <span className="font-semibold">{count}</span>
-                  </div>
-                );
-              }
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Summary */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-        <CardHeader>
-          <CardTitle className="text-lg">Summary</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground">{result.summary}</p>
-        </CardContent>
-      </Card>
-
-      {/* File Analysis */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <FileCode className="h-5 w-5" />
-            File Analysis ({result.totalFiles} files)
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Accordion type="multiple" value={expandedFiles} onValueChange={setExpandedFiles}>
-            {result.files.map((file) => (
-              <AccordionItem key={file.path} value={file.path} className="border-border/50">
-                <AccordionTrigger className="hover:no-underline">
-                  <div className="flex items-center gap-4 w-full pr-4">
-                    <div className="flex-1 text-left">
-                      <code className="text-sm font-mono">{file.path}</code>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="flex gap-1">
-                        {file.issues.length > 0 ? (
-                          (Object.keys(severityConfig) as Severity[])
-                            .reverse()
-                            .map((sev) => {
-                              const count = file.issues.filter((i) => i.severity === sev).length;
-                              return count > 0 ? (
-                                <Badge
-                                  key={sev}
-                                  variant="outline"
-                                  className={cn(
-                                    'border-none text-white text-xs',
-                                    severityConfig[sev].color
-                                  )}
-                                >
-                                  {count}
-                                </Badge>
-                              ) : null;
-                            })
-                        ) : (
-                          <Badge variant="outline" className="bg-success text-success-foreground border-none">
-                            Clean
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="w-20 text-right">
-                        <span className="text-sm text-muted-foreground">{file.score}/100</span>
-                      </div>
-                    </div>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  {file.issues.length > 0 ? (
-                    <div className="space-y-3 pt-2">
-                      {file.issues.map((issue) => (
-                        <div
-                          key={issue.id}
-                          className="p-4 rounded-lg bg-muted/30 border border-border/50"
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <SeverityBadge severity={issue.severity} />
-                                <Badge variant="outline" className="capitalize">
-                                  {categoryConfig[issue.category].label}
-                                </Badge>
-                                <span className="text-xs text-muted-foreground">
-                                  Line {issue.line}
-                                  {issue.column && `:${issue.column}`}
-                                </span>
-                              </div>
-                              <p className="font-medium">{issue.message}</p>
-                              {issue.suggestion && (
-                                <p className="text-sm text-muted-foreground mt-1">
-                                  💡 {issue.suggestion}
-                                </p>
-                              )}
-                              {issue.code && (
-                                <pre className="mt-2 p-2 rounded bg-background/50 text-sm font-mono overflow-x-auto">
-                                  <code>{issue.code}</code>
-                                </pre>
-                              )}
-                            </div>
-                          </div>
+        <TabsContent value="issues" className="mt-6">
+          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <FileCode className="h-5 w-5" />
+                Static Analysis Issues ({result.totalFiles} files)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Accordion type="multiple" value={expandedFiles} onValueChange={setExpandedFiles}>
+                {result.files.map((file) => (
+                  <AccordionItem key={file.path} value={file.path} className="border-border/50">
+                    <AccordionTrigger className="hover:no-underline">
+                      <div className="flex items-center gap-4 w-full pr-4">
+                        <div className="flex-1 text-left">
+                          <code className="text-sm font-mono">{file.path}</code>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground py-4 text-center">
-                      No issues found in this file. Great job!
-                    </p>
-                  )}
-                </AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
-        </CardContent>
-      </Card>
+                        <div className="flex items-center gap-2">
+                          {file.issues.length > 0 ? (
+                            <Badge variant="outline" className="text-warning border-warning/50">
+                              {file.issues.length} Issues
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-success border-success/50">Clean</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      {file.issues.length > 0 ? (
+                        <div className="space-y-3 pt-2">
+                          {file.issues.map((issue) => (
+                            <div key={issue.id} className="p-4 rounded-lg bg-muted/30 border border-border/50">
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Badge className={cn('capitalize text-white', severityConfig[issue.severity].color)}>
+                                      {issue.severity}
+                                    </Badge>
+                                    <span className="text-xs text-muted-foreground">Line {issue.line}</span>
+                                  </div>
+                                  <p className="text-sm font-medium">{issue.message}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : <p className="text-muted-foreground p-4 text-center text-sm">No issues found.</p>}
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="recommendations" className="mt-6 space-y-6">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Lightbulb className="h-5 w-5 text-yellow-500" />
+            Intelligent Recommendations (IERA)
+          </h2>
+          {recommendations.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {recommendations.map((rec: IERARecommendation, idx: number) => (
+                <RecommendationCard key={idx} rec={rec} />
+              ))}
+            </div>
+          ) : (
+            <Card><CardContent className="p-8 text-center text-muted-foreground">No recommendations generated for this codebase.</CardContent></Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="deep_analysis" className="mt-6 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Hallucination Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BrainCircuit className="h-5 w-5 text-purple-500" />
+                  Hallucination Detection
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="p-4 bg-muted/30 rounded-lg mb-4 text-center">
+                  <div className="text-3xl font-bold">{hallucinations.length}</div>
+                  <div className="text-xs text-muted-foreground">Potential Hallucinations Found</div>
+                </div>
+                {hallucinations.length > 0 ? (
+                  <ul className="space-y-2">
+                    {hallucinations.map((h: any, i: number) => (
+                      <li key={i} className="text-sm p-2 border rounded bg-background">
+                        <span className="font-bold">{h.file}</span>: {h.issue} (Prob: {h.probability})
+                      </li>
+                    ))}
+                  </ul>
+                ) : <div className="flex items-center gap-2 text-success text-sm justify-center"><CheckCircle2 className="h-4 w-4" /> No hallucinations detected.</div>}
+              </CardContent>
+            </Card>
+
+            {/* Semantic Analysis Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Search className="h-5 w-5 text-blue-500" />
+                  Semantic Analysis
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
+                  <span className="text-sm">Issues Found</span>
+                  <span className="font-bold">{scaaSummary.issues_found ?? 0}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
+                  <span className="text-sm">Files Analyzed</span>
+                  <span className="font-bold">{scaaSummary.files_analyzed ?? 0}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 border rounded bg-muted/20">
+                  <span className="text-sm">Avg Similarity</span>
+                  <span className="font-bold">{(scaaSummary.average_similarity ?? 0).toFixed(2)}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
