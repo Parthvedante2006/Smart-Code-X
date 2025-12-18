@@ -96,11 +96,47 @@ export default function Dashboard() {
   // GitHub unimplemented in backend for now in the new flow, so we disable or keep mock for now
   // Keeping mock or implementation plan todo
   const handleGithubSubmit = useCallback(async (url: string) => {
-    toast({
-      title: "Not Implemented",
-      description: "GitHub analysis is not yet connected to the new backend flow.",
-      variant: "destructive"
-    });
+    setState('processing');
+    setProgress(0);
+    setShowUpload(false);
+
+    try {
+      toast({
+        title: "Analyzing GitHub Repository",
+        description: "Downloading and processing repository...",
+      });
+
+      // Fake progress
+      const interval = setInterval(() => {
+        setProgress(old => {
+          if (old >= 90) return 90;
+          return old + 5;
+        });
+      }, 800);
+
+      const reviewResult = await api.reviews.analyzeGithub(url);
+
+      clearInterval(interval);
+      setProgress(100);
+
+      setReviews(prev => [reviewResult, ...prev]);
+      setSelectedReview(reviewResult);
+      setState('complete');
+
+      toast({
+        title: 'Analysis complete!',
+        description: `Found ${reviewResult.totalIssues} issues across ${reviewResult.totalFiles} files.`,
+      });
+
+    } catch (error) {
+      setState('idle');
+      setShowUpload(true);
+      toast({
+        title: "Analysis Failed",
+        description: error instanceof Error ? error.message : "Failed to analyze repository",
+        variant: "destructive"
+      });
+    }
   }, [toast]);
 
   const handleNewReview = useCallback(() => {

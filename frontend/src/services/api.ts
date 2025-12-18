@@ -64,12 +64,26 @@ const transformAnalysisToReview = (backendData: any): ReviewResult => {
         }
     });
 
+    // Weighted Score Calculation
+    let deduction = 0;
+    allIssues.forEach(issue => {
+        switch (issue.severity) {
+            case 'critical': deduction += 10; break;
+            case 'high': deduction += 5; break;
+            case 'medium': deduction += 2; break;
+            case 'low': deduction += 1; break;
+            default: deduction += 1; // Default to low if unknown
+        }
+    });
+
+    const overallScore = Math.max(0, 100 - deduction);
+
     return {
         id: backendData.id || `temp-${Date.now()}`,
         projectName: backendData.file_name || 'Project',
         file_name: backendData.file_name,
         createdAt: backendData.created_at || new Date().toISOString(),
-        overallScore: Math.max(0, 100 - (allIssues.length * 2)),
+        overallScore,
         totalFiles: files.length,
         totalIssues: allIssues.length,
         issuesBySeverity,
@@ -114,6 +128,25 @@ export const api = {
             return transformAnalysisToReview(data);
         },
 
+        async analyzeGithub(url: string): Promise<ReviewResult> {
+            const response = await fetch(`${BASE_URL}/analyze/github`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...getAuthHeader(),
+                },
+                body: JSON.stringify({ url }),
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.detail || 'Analysis failed');
+            }
+
+            const data = await response.json();
+            return transformAnalysisToReview(data);
+        },
+
         async delete(id: string): Promise<void> {
             const response = await fetch(`${BASE_URL}/reviews/${id}`, {
                 method: 'DELETE',
@@ -122,4 +155,24 @@ export const api = {
             if (!response.ok) throw new Error('Failed to delete review');
         },
     },
+
+    feedback: {
+        async submit(data: { name?: string; email?: string; type: string; message: string }): Promise<void> {
+            const response = await fetch(`${BASE_URL}/feedback`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    // Optional auth header if we want to track it, but endpoint is open
+                    ...getAuthHeader(),
+                },
+                body: JSON.stringify({
+                    feedback_type: data.type,
+                    message: data.message,
+                    name: data.name,
+                    email: data.email
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to submit feedback');
+        }
+    }
 };

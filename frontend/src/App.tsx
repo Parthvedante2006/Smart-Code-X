@@ -11,6 +11,9 @@ import Auth from "./pages/Auth";
 import AuthCallback from "./pages/AuthCallback";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
+import Feedback from "./pages/Feedback";
+import Contact from "./pages/Contact";
+import FAQ from "./pages/FAQ";
 
 const queryClient = new QueryClient();
 
@@ -34,6 +37,9 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              <Route path="/feedback" element={<Feedback />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/faq" element={<FAQ />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>

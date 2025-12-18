@@ -39,7 +39,11 @@ export function Header() {
           </span>
         </Link>
 
-        <nav className="flex items-center gap-2">
+        <nav className="flex items-center gap-4">
+          <Link to="/contact" className="text-sm font-medium hover:text-primary transition-colors">Contact</Link>
+          <Link to="/faq" className="text-sm font-medium hover:text-primary transition-colors">FAQ</Link>
+          <Link to="/feedback" className="text-sm font-medium hover:text-primary transition-colors">Feedback</Link>
+          <div className="h-4 w-px bg-border/50" />
           <ThemeToggle />
 
           {isAuthenticated ? (

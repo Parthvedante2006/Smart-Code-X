@@ -114,6 +114,70 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
   // SCAA
   const scaaSummary = rawData?.SCAA?.summary || {};
 
+  const handleDownloadReport = () => {
+    const lines = [
+      `# SmartCodeX Analysis Report`,
+      `Project: ${result.projectName}`,
+      `Date: ${new Date(result.createdAt).toLocaleString()}`,
+      `Overall Score: ${result.overallScore}/100`,
+      `\n## Summary`,
+      result.summary,
+      `\n## Statistics`,
+      `- Total Issues: ${result.totalIssues}`,
+      `- Files Analyzed: ${result.files.length}`,
+      `- AI Insights: ${recommendations.length}`,
+      `- Hallucinations: ${hallucinations.length}`,
+      `\n## Issues by Severity`,
+      `- Critical: ${result.issuesBySeverity.critical}`,
+      `- High: ${result.issuesBySeverity.high}`,
+      `- Medium: ${result.issuesBySeverity.medium}`,
+      `- Low: ${result.issuesBySeverity.low}`,
+      `\n## Detailed Issues`,
+    ];
+
+    const severityIcons: Record<string, string> = {
+      critical: '🔴',
+      high: '🟠',
+      medium: '🟡',
+      low: '🔵'
+    };
+
+    result.files.forEach(file => {
+      if (file.issues.length > 0) {
+        lines.push(`\n### File: ${file.path}`);
+        file.issues.forEach(issue => {
+          const icon = severityIcons[issue.severity] || '⚪';
+          lines.push(`- ${icon} [${issue.severity.toUpperCase()}] Line ${issue.line}: ${issue.message}`);
+        });
+      }
+    });
+
+    if (recommendations.length > 0) {
+      lines.push(`\n## AI Recommendations`);
+      recommendations.forEach(rec => {
+        lines.push(`\n### ${rec.title} (${rec.category})`);
+        lines.push(`Confidence: ${Math.round(rec.confidence * 100)}%`);
+        lines.push(rec.description);
+        if (rec.implementation_example) {
+          lines.push('\nExample:');
+          lines.push('```');
+          lines.push(rec.implementation_example);
+          lines.push('```');
+        }
+      });
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `smartcodex-report-${result.projectName.replace(/\s+/g, '-').toLowerCase()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -125,6 +189,10 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button onClick={handleDownloadReport} variant="outline" className="border-primary/20 hover:bg-primary/5 text-primary">
+            <Download className="mr-2 h-4 w-4" />
+            Download Report
+          </Button>
           <Button size="sm" onClick={onNewReview} className="bg-gradient-primary hover:opacity-90">
             <RefreshCw className="mr-2 h-4 w-4" />
             New Review
@@ -156,6 +224,27 @@ export function ReviewResults({ result, onNewReview }: ReviewResultsProps) {
                 <p className="text-muted-foreground text-lg leading-relaxed">
                   {result.summary}
                 </p>
+                <div className="grid grid-cols-4 gap-4 mt-6">
+                  {Object.entries(result.issuesBySeverity).map(([severity, count]) => {
+                    const colorMap: Record<string, string> = {
+                      low: 'text-emerald-500 border-emerald-500/20 bg-emerald-500/10',
+                      medium: 'text-amber-500 border-amber-500/20 bg-amber-500/10',
+                      high: 'text-orange-500 border-orange-500/20 bg-orange-500/10',
+                      critical: 'text-red-500 border-red-500/20 bg-red-500/10'
+                    };
+                    const colorClass = colorMap[severity.toLowerCase()] || 'text-primary';
+
+                    return (
+                      <div key={severity} className={cn("p-4 rounded-lg border flex flex-col items-center justify-center transition-colors", colorClass)}>
+                        <div className="text-2xl font-bold capitalize">
+                          {count}
+                        </div>
+                        <div className="text-xs uppercase tracking-wider mt-1 font-semibold">{severity}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
                 <div className="grid grid-cols-3 gap-4 mt-6">
                   <div className="p-4 rounded-lg bg-background/50 border">
                     <div className="text-2xl font-bold">{result.totalIssues}</div>
